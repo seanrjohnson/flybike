@@ -1,4 +1,10 @@
-import type { ConnectionStatus, TelemetrySample, TrainerSource, Unsubscribe } from "./types";
+import type {
+  ConnectionStatus,
+  TelemetrySample,
+  TrainerLoadControl,
+  TrainerSource,
+  Unsubscribe,
+} from "./types";
 
 export abstract class SourceBase implements TrainerSource {
   abstract readonly kind: "ftms-bluetooth" | "demo";
@@ -8,6 +14,8 @@ export abstract class SourceBase implements TrainerSource {
 
   abstract connect(): Promise<void>;
   abstract disconnect(): Promise<void>;
+  abstract getLoadControl(): TrainerLoadControl | undefined;
+  abstract setTrainerLoad(value: number): Promise<void>;
 
   subscribe(listener: (sample: TelemetrySample) => void): Unsubscribe {
     this.telemetryListeners.add(listener);

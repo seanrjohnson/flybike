@@ -6,11 +6,33 @@ import {
 } from "./calibration";
 import { GameAudio } from "./game/audio";
 import { emitGameEvent, gameEvents } from "./game/events";
+import type { TrajectoryPoint } from "./game/FlyScene";
 import { DemoSource } from "./trainer/demo-source";
 import { FtmsBluetoothSource } from "./trainer/ftms-bluetooth-source";
 import type { ConnectionStatus, TelemetrySample, TrainerSource } from "./trainer/types";
 
 const SCORE_KEY = "flybike.highScore.v1";
+
+const TRACE_STEPS = [
+  { cue: "Cruise", instruction: "Hold your comfortable calibrated effort", durationMs: 10_000 },
+  { cue: "Push", instruction: "Increase to your hard calibrated effort", durationMs: 8_000 },
+  { cue: "Cruise", instruction: "Return to comfortable effort", durationMs: 10_000 },
+  { cue: "Easy", instruction: "Pedal very lightly", durationMs: 8_000 },
+  { cue: "Cruise", instruction: "Return to comfortable effort", durationMs: 10_000 },
+  { cue: "Push", instruction: "Increase to your hard calibrated effort", durationMs: 8_000 },
+  { cue: "Coast", instruction: "Stop pedaling and let the wheel slow", durationMs: 6_000 },
+] as const;
+
+type TraceRecord = {
+  elapsedMs: number;
+  cue: string;
+  powerW?: number;
+  cadenceRpm?: number;
+  speedKph?: number;
+  trajectoryY?: number;
+  velocityY?: number;
+  targetVelocityY?: number;
+};
 
 function escapeHtml(value: string): string {
   const entities: Record<string, string> = {
@@ -35,6 +57,12 @@ export class AppController {
   private gameActive = false;
   private countdownActive = false;
   private demoInputPressed = false;
+  private traceActive = false;
+  private traceRecords: TraceRecord[] = [];
+  private traceStartedAt = 0;
+  private traceCue = "Cruise";
+  private traceGuideTimer?: number;
+  private tracePosition?: TrajectoryPoint;
   private wakeLock?: WakeLockSentinelLike;
   private readonly audio = new GameAudio();
 
@@ -46,6 +74,10 @@ export class AppController {
   private readonly scoreValue = document.querySelector<HTMLElement>("#score-value")!;
   private readonly connectionPill = document.querySelector<HTMLElement>("#connection-pill")!;
   private readonly muteButton = document.querySelector<HTMLButtonElement>("#mute-button")!;
+  private readonly traceCuePanel = document.querySelector<HTMLElement>("#trace-cue")!;
+  private readonly traceCueTitle = document.querySelector<HTMLElement>("#trace-cue-title")!;
+  private readonly traceCueCopy = document.querySelector<HTMLElement>("#trace-cue-copy")!;
+  private readonly traceCueProgress = document.querySelector<HTMLElement>("#trace-cue-progress")!;
 
   constructor() {
     this.muteButton.textContent = this.audio.isMuted() ? "Sound off" : "Sound on";
@@ -61,11 +93,19 @@ export class AppController {
       void this.handleGameOver((event as CustomEvent<number>).detail);
     });
     gameEvents.addEventListener("signal-stale", () => this.pauseForSignal());
+    gameEvents.addEventListener("trajectory", (event) => {
+      this.tracePosition = (event as CustomEvent<TrajectoryPoint>).detail;
+    });
     gameEvents.addEventListener("signal-returned", () => {
       if (this.gameActive) this.showPause("Signal restored", "Resume when you are ready.");
     });
     document.addEventListener("visibilitychange", () => {
-      if (document.hidden && this.gameActive) this.showPause("Paused", "The game lost focus.");
+      if (!document.hidden || !this.gameActive) return;
+      if (this.traceActive) void this.finishTrace("Trace stopped when the game lost focus.");
+      else this.showPause("Paused", "The game lost focus.");
+    });
+    document.querySelector("#trace-cancel")?.addEventListener("click", () => {
+      void this.finishTrace("Trace ended early.");
     });
     this.bindDemoControls();
     this.showHome();
@@ -141,6 +181,18 @@ export class AppController {
       sample.cadenceRpm === undefined ? "—" : sample.cadenceRpm.toFixed(0);
     this.speedValue.textContent = sample.speedKph === undefined ? "—" : sample.speedKph.toFixed(1);
     this.sampleCollector?.(sample);
+    if (this.traceActive) {
+      this.traceRecords.push({
+        elapsedMs: Math.round(performance.now() - this.traceStartedAt),
+        cue: this.traceCue,
+        powerW: sample.powerW,
+        cadenceRpm: sample.cadenceRpm,
+        speedKph: sample.speedKph,
+        trajectoryY: this.tracePosition?.y,
+        velocityY: this.tracePosition?.velocityY,
+        targetVelocityY: this.tracePosition?.targetVelocityY,
+      });
+    }
     if (this.gameActive && sample.powerW !== undefined) {
       emitGameEvent("telemetry", {
         powerW: Math.max(0, sample.powerW),
@@ -160,6 +212,21 @@ export class AppController {
 
   private showTrainerReady(status: ConnectionStatus, demo = false): void {
     const calibrated = Boolean(this.profile);
+    const loadControl = this.source?.getLoadControl();
+    const initialLoad = loadControl
+      ? Math.max(loadControl.minimum, Math.min(loadControl.maximum, 0))
+      : 0;
+    const loadMarkup =
+      !demo && loadControl
+        ? `<div class="load-control">
+            <label for="trainer-load">${escapeHtml(loadControl.label)}: <output id="trainer-load-value">${initialLoad}${escapeHtml(loadControl.unit)}</output></label>
+            <input id="trainer-load" type="range" min="${loadControl.minimum}" max="${loadControl.maximum}" step="${loadControl.increment}" value="${initialLoad}">
+            <button id="apply-load">Apply load</button>
+            <span id="load-status" class="fine-print">Applied only when you press the button; start low.</span>
+          </div>`
+        : !demo
+          ? '<p class="fine-print">This trainer does not advertise compatible FTMS resistance or simulation control.</p>'
+          : "";
     this.overlay.classList.remove("hidden", "compact");
     this.overlay.innerHTML = `
       <section class="panel" aria-labelledby="ready-title">
@@ -170,14 +237,25 @@ export class AppController {
           <span><strong id="setup-cadence">${this.latestSample.cadenceRpm?.toFixed(0) ?? "—"}</strong> rpm</span>
         </div>
         <p>${demo ? "Hold Space, Arrow Up, or the screen to climb. Release to descend." : calibrated ? `Cruise ${this.profile!.cruisePowerW} W · Hard ${this.profile!.hardPowerW} W` : "A short two-effort calibration makes flight respond to you."}</p>
+        ${loadMarkup}
         <div class="actions">
           ${calibrated ? '<button id="fly-button" class="primary">Start flight</button>' : '<button id="calibrate-button" class="primary">Calibrate effort</button>'}
+          ${!demo && calibrated ? '<button id="trace-button">Guided trace</button>' : ""}
           ${!demo && calibrated ? '<button id="recalibrate-button">Recalibrate</button>' : ""}
           <button id="back-button">Back</button>
         </div>
       </section>`;
     const setupPower = this.overlay.querySelector("#setup-power");
     const setupCadence = this.overlay.querySelector("#setup-cadence");
+    const loadSlider = this.overlay.querySelector<HTMLInputElement>("#trainer-load");
+    const loadValue = this.overlay.querySelector<HTMLOutputElement>("#trainer-load-value");
+    loadSlider?.addEventListener("input", () => {
+      if (loadValue && loadControl)
+        loadValue.textContent = `${loadSlider.value}${loadControl.unit}`;
+    });
+    this.overlay.querySelector("#apply-load")?.addEventListener("click", () => {
+      if (loadSlider) void this.applyTrainerLoad(Number(loadSlider.value));
+    });
     const unsubscribe = this.source?.subscribe((sample) => {
       if (setupPower && sample.powerW !== undefined) setupPower.textContent = String(sample.powerW);
       if (setupCadence && sample.cadenceRpm !== undefined)
@@ -186,6 +264,10 @@ export class AppController {
     this.overlay.querySelector("#fly-button")?.addEventListener("click", () => {
       unsubscribe?.();
       void this.startRun();
+    });
+    this.overlay.querySelector("#trace-button")?.addEventListener("click", () => {
+      unsubscribe?.();
+      void this.startRun("trace");
     });
     this.overlay.querySelector("#calibrate-button")?.addEventListener("click", () => {
       unsubscribe?.();
@@ -200,6 +282,23 @@ export class AppController {
       void this.source?.disconnect();
       this.showHome();
     });
+  }
+
+  private async applyTrainerLoad(value: number): Promise<void> {
+    const button = this.overlay.querySelector<HTMLButtonElement>("#apply-load");
+    const status = this.overlay.querySelector<HTMLElement>("#load-status");
+    if (button) button.disabled = true;
+    if (status) status.textContent = "Applying…";
+    try {
+      await this.source?.setTrainerLoad(value);
+      if (status) status.textContent = "Trainer acknowledged the new load.";
+    } catch (error) {
+      if (status)
+        status.textContent =
+          error instanceof Error ? error.message : "Trainer load could not be changed.";
+    } finally {
+      if (button) button.disabled = false;
+    }
   }
 
   private async runCalibration(): Promise<void> {
@@ -279,7 +378,7 @@ export class AppController {
     });
   }
 
-  private async startRun(): Promise<void> {
+  private async startRun(mode: "game" | "trace" = "game"): Promise<void> {
     if (!this.profile || this.countdownActive) return;
     this.countdownActive = true;
     this.overlay.classList.remove("hidden");
@@ -292,21 +391,31 @@ export class AppController {
     this.overlay.classList.remove("compact");
     this.hud.classList.remove("hidden");
     this.gameActive = true;
+    this.traceActive = mode === "trace";
     this.countdownActive = false;
     this.audio.play("start");
     await this.requestWakeLock();
     if (this.demoSource) this.demoSource.setEffort(this.demoInputPressed ? 1 : 120 / 260);
-    emitGameEvent("start-run", { profile: this.profile, demo: this.source?.kind === "demo" });
+    emitGameEvent("start-run", {
+      profile: this.profile,
+      demo: this.source?.kind === "demo",
+      mode,
+    });
     if (this.latestSample.powerW !== undefined) {
       emitGameEvent("telemetry", {
         powerW: this.latestSample.powerW,
         timestamp: this.latestSample.timestamp,
       });
     }
+    if (mode === "trace") this.beginTraceGuide();
   }
 
   private pauseForSignal(message = "Trainer data paused."): void {
     if (!this.gameActive) return;
+    if (this.traceActive) {
+      void this.finishTrace(message);
+      return;
+    }
     emitGameEvent("pause-run", undefined);
     this.showPause("Waiting for trainer", message);
   }
@@ -375,12 +484,108 @@ export class AppController {
 
   private quitRun(): void {
     this.gameActive = false;
+    this.traceActive = false;
+    this.stopTraceGuide();
+    this.traceCuePanel.classList.add("hidden");
     this.hud.classList.add("hidden");
+    emitGameEvent("stop-run", undefined);
     void this.releaseWakeLock();
     this.showTrainerReady(
       this.source?.getStatus() ?? { state: "disconnected" },
       this.source?.kind === "demo",
     );
+  }
+
+  private beginTraceGuide(): void {
+    this.traceRecords = [];
+    this.tracePosition = undefined;
+    this.traceStartedAt = performance.now();
+    this.traceCuePanel.classList.remove("hidden");
+    this.updateTraceGuide();
+    this.traceGuideTimer = window.setInterval(() => this.updateTraceGuide(), 100);
+  }
+
+  private updateTraceGuide(): void {
+    const elapsed = performance.now() - this.traceStartedAt;
+    let stepStart = 0;
+    for (const step of TRACE_STEPS) {
+      const stepEnd = stepStart + step.durationMs;
+      if (elapsed < stepEnd) {
+        this.traceCue = step.cue;
+        this.traceCueTitle.textContent = step.cue;
+        this.traceCueCopy.textContent = step.instruction;
+        this.traceCueProgress.style.width = `${((elapsed - stepStart) / step.durationMs) * 100}%`;
+        return;
+      }
+      stepStart = stepEnd;
+    }
+    void this.finishTrace("Guided trace complete.");
+  }
+
+  private stopTraceGuide(): void {
+    if (this.traceGuideTimer) window.clearInterval(this.traceGuideTimer);
+    this.traceGuideTimer = undefined;
+  }
+
+  private async finishTrace(message: string): Promise<void> {
+    if (!this.traceActive) return;
+    this.traceActive = false;
+    this.gameActive = false;
+    this.stopTraceGuide();
+    this.traceCuePanel.classList.add("hidden");
+    this.hud.classList.add("hidden");
+    emitGameEvent("stop-run", undefined);
+    await this.releaseWakeLock();
+    const count = this.traceRecords.length;
+    this.overlay.classList.remove("hidden");
+    this.overlay.innerHTML = `
+      <section class="panel small-panel"><p class="eyebrow">Flight trace</p><h2>${escapeHtml(message)}</h2>
+        <p>Recorded ${count} trainer samples. Download the CSV and attach it when you want the flight model tuned to your trainer.</p>
+        <div class="actions"><button id="download-trace" class="primary" ${count ? "" : "disabled"}>Download CSV</button><button id="trace-again">Run again</button><button id="quit-button">Setup</button></div>
+      </section>`;
+    this.overlay
+      .querySelector("#download-trace")
+      ?.addEventListener("click", () => this.downloadTrace());
+    this.overlay
+      .querySelector("#trace-again")
+      ?.addEventListener("click", () => void this.startRun("trace"));
+    this.overlay.querySelector("#quit-button")?.addEventListener("click", () => this.quitRun());
+  }
+
+  private downloadTrace(): void {
+    const header = [
+      "elapsed_ms",
+      "cue",
+      "power_w",
+      "cadence_rpm",
+      "speed_kph",
+      "trajectory_y",
+      "velocity_y",
+      "target_velocity_y",
+      "calibrated_cruise_w",
+      "calibrated_hard_w",
+    ];
+    const rows = this.traceRecords.map((record) =>
+      [
+        record.elapsedMs,
+        record.cue,
+        record.powerW ?? "",
+        record.cadenceRpm ?? "",
+        record.speedKph ?? "",
+        record.trajectoryY?.toFixed(3) ?? "",
+        record.velocityY?.toFixed(3) ?? "",
+        record.targetVelocityY?.toFixed(3) ?? "",
+        this.profile?.cruisePowerW ?? "",
+        this.profile?.hardPowerW ?? "",
+      ].join(","),
+    );
+    const blob = new Blob([[header.join(","), ...rows].join("\n")], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `flybike-trace-${new Date().toISOString().replaceAll(":", "-")}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
   }
 
   private bindDemoControls(): void {

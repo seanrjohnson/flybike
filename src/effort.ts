@@ -9,6 +9,8 @@ export class EffortMapper {
   constructor(
     private readonly profile: CalibrationProfile,
     private readonly halfLifeMs = 500,
+    private readonly maxVerticalSpeed = MAX_VERTICAL_SPEED,
+    private readonly deadbandFraction = 0,
   ) {}
 
   update(powerW: number, deltaMs: number): number {
@@ -25,11 +27,14 @@ export class EffortMapper {
 
   targetVelocity(powerW: number): number {
     const { cruisePowerW, hardPowerW } = this.profile;
-    if (powerW <= cruisePowerW) {
-      return MAX_VERTICAL_SPEED * (1 - Math.max(0, powerW) / cruisePowerW);
+    const lowCruise = cruisePowerW * (1 - this.deadbandFraction);
+    const highCruise = cruisePowerW + (hardPowerW - cruisePowerW) * this.deadbandFraction;
+    if (powerW < lowCruise) {
+      return this.maxVerticalSpeed * (1 - Math.max(0, powerW) / lowCruise);
     }
-    const climb = Math.min(1, (powerW - cruisePowerW) / (hardPowerW - cruisePowerW));
-    return -MAX_VERTICAL_SPEED * climb;
+    if (powerW <= highCruise) return 0;
+    const climb = Math.min(1, (powerW - highCruise) / (hardPowerW - highCruise));
+    return -this.maxVerticalSpeed * climb;
   }
 
   getSmoothedPower(): number {

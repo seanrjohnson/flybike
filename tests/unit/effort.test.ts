@@ -29,4 +29,12 @@ describe("EffortMapper", () => {
     expect(mapper.getSmoothedPower()).toBeGreaterThan(0);
     expect(mapper.getSmoothedPower()).toBeLessThan(240);
   });
+
+  it("gives trainer input a cruise deadband and gentler maximum speed", () => {
+    const mapper = new EffortMapper(profile, 250, 55, 0.12);
+    expect(mapper.targetVelocity(110)).toBe(0);
+    expect(mapper.targetVelocity(130)).toBe(0);
+    expect(mapper.targetVelocity(0)).toBe(55);
+    expect(mapper.targetVelocity(240)).toBe(-55);
+  });
 });

@@ -178,6 +178,32 @@ button.primary:focus-visible {
 .live-readout strong {
   font-size: 2rem;
 }
+
+.load-control {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.45rem 0.75rem;
+  align-items: center;
+  margin: 1rem auto;
+  padding: 0.75rem;
+  background: rgba(112, 80, 55, 0.09);
+  border: 1px solid rgba(112, 80, 55, 0.45);
+}
+
+.load-control label,
+.load-control input,
+.load-control .fine-print {
+  grid-column: 1 / -1;
+}
+
+.load-control output {
+  font-family: "Pixelify Sans", monospace;
+}
+
+.load-control input {
+  width: 100%;
+  accent-color: #8e4937;
+}
 .progress {
   height: 0.8rem;
   margin-top: 1.5rem;
@@ -197,6 +223,51 @@ button.primary:focus-visible {
   font-family: "Pixelify Sans", monospace;
   font-size: min(36vw, 12rem);
   text-shadow: 6px 6px 0 #6f3b2e;
+}
+
+.trace-cue {
+  position: absolute;
+  z-index: 6;
+  top: max(3.5rem, calc(env(safe-area-inset-top) + 3.5rem));
+  left: 50%;
+  width: min(28rem, 88vw);
+  padding: 0.65rem 0.85rem;
+  transform: translateX(-50%);
+  color: #fff0c4;
+  background: rgba(44, 29, 23, 0.9);
+  border: 2px solid #d2ac6d;
+  text-align: center;
+}
+
+.trace-cue strong,
+.trace-cue span {
+  display: block;
+}
+
+.trace-cue strong {
+  font-family: "Pixelify Sans", monospace;
+  font-size: 1.6rem;
+  text-transform: uppercase;
+}
+
+.trace-cue button {
+  min-height: 0;
+  margin-top: 0.45rem;
+  padding: 0.25rem 0.6rem;
+}
+
+.trace-progress {
+  height: 0.35rem;
+  margin-top: 0.5rem;
+  overflow: hidden;
+  background: #705037;
+}
+
+.trace-progress i {
+  display: block;
+  width: 0;
+  height: 100%;
+  background: #f0cc74;
 }
 
 .hud {

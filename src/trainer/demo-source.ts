@@ -27,4 +27,13 @@ export class DemoSource extends SourceBase {
   setEffort(effort: number): void {
     this.effort = Math.max(0, Math.min(1, effort));
   }
+
+  getLoadControl(): undefined {
+    return undefined;
+  }
+
+  async setTrainerLoad(value: number): Promise<void> {
+    void value;
+    throw new Error("Trainer load control is unavailable in demo mode.");
+  }
 }

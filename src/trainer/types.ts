@@ -17,6 +17,15 @@ export type TelemetrySample = {
 
 export type Unsubscribe = () => void;
 
+export type TrainerLoadControl = {
+  mode: "resistance" | "simulation-grade";
+  label: string;
+  unit: string;
+  minimum: number;
+  maximum: number;
+  increment: number;
+};
+
 export interface TrainerSource {
   readonly kind: "ftms-bluetooth" | "demo";
   connect(): Promise<void>;
@@ -24,4 +33,6 @@ export interface TrainerSource {
   subscribe(listener: (sample: TelemetrySample) => void): Unsubscribe;
   subscribeStatus(listener: (status: ConnectionStatus) => void): Unsubscribe;
   getStatus(): ConnectionStatus;
+  getLoadControl(): TrainerLoadControl | undefined;
+  setTrainerLoad(value: number): Promise<void>;
 }

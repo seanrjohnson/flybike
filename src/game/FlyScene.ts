@@ -14,6 +14,14 @@ type ObstaclePair = {
 type StartRunDetail = {
   profile: CalibrationProfile;
   demo: boolean;
+  mode: "game" | "trace";
+};
+
+export type TrajectoryPoint = {
+  elapsedMs: number;
+  y: number;
+  velocityY: number;
+  targetVelocityY: number;
 };
 
 const WIDTH = 320;
@@ -37,6 +45,10 @@ export class FlyScene extends Phaser.Scene {
   private spawnElapsed = 0;
   private score = 0;
   private velocityResponseMs = 350;
+  private mode: "game" | "trace" = "game";
+  private rawPlayerY = 88;
+  private lastTrajectoryAt = 0;
+  private trainerRun = false;
 
   constructor() {
     super("fly");
@@ -65,6 +77,7 @@ export class FlyScene extends Phaser.Scene {
     gameEvents.addEventListener("telemetry", this.onTelemetry);
     gameEvents.addEventListener("pause-run", this.onPauseRun);
     gameEvents.addEventListener("resume-run", this.onResumeRun);
+    gameEvents.addEventListener("stop-run", this.onStopRun);
 
     emitGameEvent("scene-ready", undefined);
   }
@@ -79,15 +92,35 @@ export class FlyScene extends Phaser.Scene {
     const targetVelocity = this.mapper.update(this.powerW, delta);
     const velocityEase = 1 - Math.exp(-delta / this.velocityResponseMs);
     this.velocityY += (targetVelocity - this.velocityY) * velocityEase;
-    this.player.y += this.velocityY * dt;
+    this.rawPlayerY += this.velocityY * dt;
+    this.player.y =
+      this.mode === "trace" ? Phaser.Math.Clamp(this.rawPlayerY, 10, HEIGHT - 20) : this.rawPlayerY;
     const targetPitch = Phaser.Math.Clamp(this.velocityY / 500, -0.25, 0.25);
     this.player.rotation = Math.round(targetPitch / PITCH_STEP) * PITCH_STEP;
     this.shadow.scaleX = Phaser.Math.Clamp(1.25 - this.player.y / HEIGHT, 0.35, 1);
     this.shadow.alpha = Phaser.Math.Clamp(this.player.y / HEIGHT / 4, 0.05, 0.2);
 
+    if (this.mode === "trace") {
+      if (performance.now() - this.lastTrajectoryAt >= 100) {
+        this.lastTrajectoryAt = performance.now();
+        emitGameEvent<TrajectoryPoint>("trajectory", {
+          elapsedMs: this.elapsed * 1000,
+          y: this.rawPlayerY,
+          velocityY: this.velocityY,
+          targetVelocityY: targetVelocity,
+        });
+      }
+      this.checkTelemetryHealth();
+      return;
+    }
+
     const difficulty = Math.min(1, this.elapsed / 90);
-    const speed = Phaser.Math.Linear(45, 76, difficulty);
-    const spawnEvery = Phaser.Math.Linear(2.15, 1.55, difficulty);
+    const speed = this.trainerRun
+      ? Phaser.Math.Linear(38, 60, difficulty)
+      : Phaser.Math.Linear(45, 76, difficulty);
+    const spawnEvery = this.trainerRun
+      ? Phaser.Math.Linear(2.45, 1.85, difficulty)
+      : Phaser.Math.Linear(2.15, 1.55, difficulty);
     if (this.spawnElapsed >= spawnEvery) {
       this.spawnObstacle(difficulty);
       this.spawnElapsed = 0;
@@ -103,11 +136,7 @@ export class FlyScene extends Phaser.Scene {
     }
     this.removeOldObstacles();
 
-    if (performance.now() - this.lastTelemetryAt > 2_000) {
-      this.pausedForSignal = true;
-      emitGameEvent("signal-stale", undefined);
-      return;
-    }
+    if (!this.checkTelemetryHealth()) return;
     if (this.collides()) this.endRun();
   }
 
@@ -140,9 +169,11 @@ export class FlyScene extends Phaser.Scene {
   }
 
   private readonly onStartRun = (event: Event): void => {
-    const { profile, demo } = (event as CustomEvent<StartRunDetail>).detail;
-    this.mapper = new EffortMapper(profile, demo ? 80 : 500);
-    this.velocityResponseMs = demo ? 120 : 350;
+    const { profile, demo, mode } = (event as CustomEvent<StartRunDetail>).detail;
+    this.mode = mode;
+    this.trainerRun = !demo;
+    this.mapper = new EffortMapper(profile, demo ? 80 : 250, demo ? 90 : 55, demo ? 0 : 0.12);
+    this.velocityResponseMs = demo ? 120 : 240;
     this.clearObstacles();
     this.player
       .setPosition(PLAYER_X, 88)
@@ -150,11 +181,13 @@ export class FlyScene extends Phaser.Scene {
       .setRotation(0)
       .setVisible(true);
     this.velocityY = 0;
+    this.rawPlayerY = 88;
     this.powerW = profile.cruisePowerW;
     this.lastTelemetryAt = performance.now();
     this.elapsed = 0;
     this.spawnElapsed = 1;
     this.score = 0;
+    this.lastTrajectoryAt = 0;
     this.pausedForSignal = false;
     this.running = true;
     emitGameEvent("score", 0);
@@ -178,8 +211,20 @@ export class FlyScene extends Phaser.Scene {
     }
   };
 
+  private readonly onStopRun = (): void => {
+    this.running = false;
+    this.pausedForSignal = false;
+    this.clearObstacles();
+    this.rawPlayerY = 88;
+    this.player.setPosition(PLAYER_X, 88).setRotation(0);
+  };
+
   private spawnObstacle(difficulty: number): void {
-    const gap = Math.round(Phaser.Math.Linear(72, 52, difficulty));
+    const gap = Math.round(
+      this.trainerRun
+        ? Phaser.Math.Linear(92, 68, difficulty)
+        : Phaser.Math.Linear(72, 52, difficulty),
+    );
     const margin = 18;
     const gapY = Phaser.Math.Between(margin + gap / 2, HEIGHT - margin - gap / 2 - 18);
     const width = 20;
@@ -199,7 +244,14 @@ export class FlyScene extends Phaser.Scene {
   }
 
   private collides(): boolean {
-    const playerBounds = new Phaser.Geom.Rectangle(this.player.x - 17, this.player.y - 10, 34, 20);
+    const hitboxWidth = this.trainerRun ? 26 : 34;
+    const hitboxHeight = this.trainerRun ? 14 : 20;
+    const playerBounds = new Phaser.Geom.Rectangle(
+      this.player.x - hitboxWidth / 2,
+      this.player.y - hitboxHeight / 2,
+      hitboxWidth,
+      hitboxHeight,
+    );
     if (playerBounds.top <= 0 || playerBounds.bottom >= HEIGHT - 15) return true;
     return this.obstacles.some((pair) =>
       [pair.top, pair.bottom, pair.topCap, pair.bottomCap].some((part) =>
@@ -223,6 +275,13 @@ export class FlyScene extends Phaser.Scene {
       for (const part of [pair.top, pair.bottom, pair.topCap, pair.bottomCap]) part.destroy();
     }
     this.obstacles = [];
+  }
+
+  private checkTelemetryHealth(): boolean {
+    if (performance.now() - this.lastTelemetryAt <= 2_000) return true;
+    this.pausedForSignal = true;
+    emitGameEvent("signal-stale", undefined);
+    return false;
   }
 
   private endRun(): void {

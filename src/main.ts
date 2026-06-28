@@ -13,6 +13,12 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
     </div>
     <div id="connection-pill" class="connection-pill" data-state="disconnected">disconnected</div>
     <button id="mute-button" class="mute-button" type="button">Sound on</button>
+    <div id="trace-cue" class="trace-cue hidden" aria-live="polite">
+      <strong id="trace-cue-title">Cruise</strong>
+      <span id="trace-cue-copy">Hold your comfortable effort</span>
+      <div class="trace-progress"><i id="trace-cue-progress"></i></div>
+      <button id="trace-cancel" type="button">End trace</button>
+    </div>
     <div id="overlay" class="overlay"></div>
   </main>`;
 

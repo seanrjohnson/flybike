@@ -24,7 +24,21 @@ ANT+, Wahoo-specific BLE services, and Cycling Power Service sensors are future 
 4. Complete the first-use cruise/hard calibration. It is stored locally for that trainer.
 5. Start the flight. Cruise power maintains altitude, greater power climbs, and lower power descends.
 
-The app never writes resistance commands. Set the bike gearing to a comfortable range and let the trainer use its normal progressive resistance curve.
+By default the app only reads telemetry. Unless you explicitly apply a supported load in setup, set the bike gearing to a comfortable range and let the trainer use its normal progressive resistance curve.
+
+Trainer gameplay uses a wider cruise-power deadband, larger and slower gates, a gentler maximum vertical speed, and a smaller collision box than keyboard mode. These settings compensate for the physical momentum and reporting delay of a trainer flywheel.
+
+### Guided traces
+
+After connecting and calibrating a trainer, select **Guided trace** to run a one-minute obstacle-free session. Follow the on-screen cruise, push, easy, and coast cues. The bike remains visible at the edge of the screen, but the exported trajectory is not clamped by a roof or floor.
+
+At the end, download the CSV. It contains cue timing, power, cadence, speed, raw trajectory, actual and requested vertical velocity, and the calibration wattages. Attach that file to a FlyBike issue or development conversation to tune the trainer model against real flywheel behavior. Trace data stays in the browser until you explicitly download it.
+
+### Trainer load
+
+Some FTMS trainers advertise direct resistance control; others advertise simulated grade. When either capability is available, setup shows a bounded load slider. Changing the slider alone does nothing: start at a low value and press **Apply load** to send it. FlyBike requests FTMS control, clamps the command to the advertised/safe range, and requires the trainer to acknowledge it. No load is restored or applied automatically after reconnecting.
+
+If no load control appears, the trainer did not advertise a compatible FTMS target. Telemetry and gameplay still work normally.
 
 If the trainer disconnects or stops reporting data, the game pauses. Reconnect or resolve the competing app connection before resuming.
 
@@ -55,6 +69,7 @@ The Bluetooth chooser requires a direct user gesture and cannot be automated in 
 ## Architecture
 
 - `src/trainer/` contains the transport-neutral `TrainerSource` contract, FTMS adapter, demo adapter, and packet decoder.
+- `src/trainer/ftms-control.ts` contains tested FTMS feature/range parsing and load command encoding.
 - `src/calibration.ts` stores robust per-device cruise/hard effort profiles in local storage.
 - `src/effort.ts` smooths instantaneous power and maps it to vertical target velocity.
 - `src/game/` contains the Phaser scene and original game presentation.
