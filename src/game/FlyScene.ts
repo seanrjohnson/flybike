@@ -21,6 +21,7 @@ const HEIGHT = 180;
 const PLAYER_X = 65;
 const PLAYER_WIDTH = 66;
 const PLAYER_HEIGHT = 44;
+const PITCH_STEP = Phaser.Math.DegToRad(2);
 
 export class FlyScene extends Phaser.Scene {
   private player!: Phaser.GameObjects.Image;
@@ -50,6 +51,9 @@ export class FlyScene extends Phaser.Scene {
       .setBounds(0, 0, WIDTH, HEIGHT)
       .setZoom(3)
       .centerOn(WIDTH / 2, HEIGHT / 2);
+    // The generated sprite contains much finer detail than the logical game grid.
+    // Linear filtering avoids nearest-neighbor shimmer while it is pitched in flight.
+    this.textures.get("ornithopter").setFilter(Phaser.Textures.FilterMode.LINEAR);
     this.createBackdrop();
     this.shadow = this.add.ellipse(PLAYER_X, 158, 38, 5, 0x553a2c, 0.16);
     this.player = this.add
@@ -76,9 +80,8 @@ export class FlyScene extends Phaser.Scene {
     const velocityEase = 1 - Math.exp(-delta / this.velocityResponseMs);
     this.velocityY += (targetVelocity - this.velocityY) * velocityEase;
     this.player.y += this.velocityY * dt;
-    this.player.rotation = Phaser.Math.Clamp(this.velocityY / 500, -0.25, 0.25);
-    this.player.displayHeight =
-      PLAYER_HEIGHT * (0.95 + Math.sin(this.elapsed * (5 + this.powerW / 45)) * 0.05);
+    const targetPitch = Phaser.Math.Clamp(this.velocityY / 500, -0.25, 0.25);
+    this.player.rotation = Math.round(targetPitch / PITCH_STEP) * PITCH_STEP;
     this.shadow.scaleX = Phaser.Math.Clamp(1.25 - this.player.y / HEIGHT, 0.35, 1);
     this.shadow.alpha = Phaser.Math.Clamp(this.player.y / HEIGHT / 4, 0.05, 0.2);
 
