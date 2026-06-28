@@ -1,2 +1,73 @@
-# flybike
-A silly web app game for bike trainers
+# FlyBike
+
+FlyBike is an endless arcade flight game controlled by a smart bike trainer. Pedaling power lifts a pixel-art, Da Vinci-inspired ornithopter; easing off lets it descend.
+
+The app is a completely static SPA. Trainer data stays in the browser and no account or server is required.
+
+## Supported hardware and browsers
+
+The first release reads the Bluetooth Fitness Machine Service (FTMS) Indoor Bike Data characteristic. It is designed for the Saris M2, and should work with other FTMS trainers that report instantaneous power.
+
+- Chrome or Edge on Windows, macOS, and ChromeOS
+- Chrome-family browsers on Android
+- HTTPS in production (`localhost` is accepted during development)
+
+Safari/iOS and Firefox do not currently expose the Web Bluetooth API needed by this app. A keyboard/touch demo mode remains available everywhere the game itself runs.
+
+ANT+, Wahoo-specific BLE services, and Cycling Power Service sensors are future adapters; they are not included in this release.
+
+## Playing
+
+1. Power on the trainer and close Zwift, ROUVY, Saris, or any other app connected to it.
+2. Open FlyBike and select **Connect trainer** from a compatible browser.
+3. Select the trainer in the browser device chooser.
+4. Complete the first-use cruise/hard calibration. It is stored locally for that trainer.
+5. Start the flight. Cruise power maintains altitude, greater power climbs, and lower power descends.
+
+The app never writes resistance commands. Set the bike gearing to a comfortable range and let the trainer use its normal progressive resistance curve.
+
+If the trainer disconnects or stops reporting data, the game pauses. Reconnect or resolve the competing app connection before resuming.
+
+Demo mode uses `Space`, `ArrowUp`, or press-and-hold anywhere outside a button to climb. Release to descend.
+
+## Development
+
+Prerequisites: Node.js 22 and npm.
+
+```sh
+npm install
+npm run dev
+```
+
+Useful checks:
+
+```sh
+npm run lint
+npm run format
+npm test
+npm run build
+npx playwright install chromium
+npm run test:e2e
+```
+
+The Bluetooth chooser requires a direct user gesture and cannot be automated in normal browser tests. FTMS parsing, calibration, and flight mapping are unit tested; Playwright covers the complete demo-mode flow. Physical trainer acceptance testing remains manual.
+
+## Architecture
+
+- `src/trainer/` contains the transport-neutral `TrainerSource` contract, FTMS adapter, demo adapter, and packet decoder.
+- `src/calibration.ts` stores robust per-device cruise/hard effort profiles in local storage.
+- `src/effort.ts` smooths instantaneous power and maps it to vertical target velocity.
+- `src/game/` contains the Phaser scene and original game presentation.
+- `src/app.ts` owns setup, calibration, pause/reconnect, persistence, and DOM UI state.
+
+New protocols should implement `TrainerSource` and emit the same normalized `TelemetrySample`; game physics must not depend on a transport.
+
+## GitHub Pages
+
+The Pages workflow tests and builds every push to `main`, then deploys `dist/` with the `/flybike/` base path. Enable **GitHub Actions** as the Pages source in the repository settings before the first deployment.
+
+## Art and license
+
+The ornithopter sprite is an original project asset generated for FlyBike using OpenAI's built-in image generation tool, then chroma-keyed locally for transparency. The final prompt requested a single side-view 16-bit pixel-art pedal-powered Leonardo-style ornithopter on a flat green background, using an umber, brass, parchment, burgundy, and blue-gray palette with no text or logos.
+
+Code and project assets are released under the [MIT License](LICENSE).
