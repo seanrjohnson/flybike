@@ -3,6 +3,8 @@ import { expect, test } from "@playwright/test";
 test("starts a complete demo-mode flight", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "FlyBike" })).toBeVisible();
+  await expect(page.locator("#game-host canvas")).toHaveAttribute("width", "960");
+  await expect(page.locator("#game-host canvas")).toHaveAttribute("height", "540");
   await page.getByRole("button", { name: "Play with keys / touch" }).click();
   await expect(page.getByRole("heading", { name: "Demo controls" })).toBeVisible();
   await page.getByRole("button", { name: "Start flight" }).click();

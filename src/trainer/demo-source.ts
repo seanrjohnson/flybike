@@ -3,7 +3,8 @@ import { SourceBase } from "./source-base";
 export class DemoSource extends SourceBase {
   readonly kind = "demo" as const;
   private timer?: number;
-  private effort = 0;
+  // Begin at the demo profile's 120 W cruise power so the player starts level.
+  private effort = 120 / 260;
 
   async connect(): Promise<void> {
     this.setStatus({ state: "connected", deviceId: "demo", deviceName: "Demo controls" });

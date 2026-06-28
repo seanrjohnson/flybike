@@ -1,5 +1,7 @@
 import type { CalibrationProfile } from "./calibration";
 
+export const MAX_VERTICAL_SPEED = 90;
+
 export class EffortMapper {
   private smoothedPower = 0;
   private initialized = false;
@@ -24,10 +26,10 @@ export class EffortMapper {
   targetVelocity(powerW: number): number {
     const { cruisePowerW, hardPowerW } = this.profile;
     if (powerW <= cruisePowerW) {
-      return 180 * (1 - Math.max(0, powerW) / cruisePowerW);
+      return MAX_VERTICAL_SPEED * (1 - Math.max(0, powerW) / cruisePowerW);
     }
     const climb = Math.min(1, (powerW - cruisePowerW) / (hardPowerW - cruisePowerW));
-    return -180 * climb;
+    return -MAX_VERTICAL_SPEED * climb;
   }
 
   getSmoothedPower(): number {

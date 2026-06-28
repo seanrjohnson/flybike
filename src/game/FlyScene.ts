@@ -11,9 +11,16 @@ type ObstaclePair = {
   scored: boolean;
 };
 
+type StartRunDetail = {
+  profile: CalibrationProfile;
+  demo: boolean;
+};
+
 const WIDTH = 320;
 const HEIGHT = 180;
 const PLAYER_X = 65;
+const PLAYER_WIDTH = 66;
+const PLAYER_HEIGHT = 44;
 
 export class FlyScene extends Phaser.Scene {
   private player!: Phaser.GameObjects.Image;
@@ -28,6 +35,7 @@ export class FlyScene extends Phaser.Scene {
   private elapsed = 0;
   private spawnElapsed = 0;
   private score = 0;
+  private velocityResponseMs = 350;
 
   constructor() {
     super("fly");
@@ -38,9 +46,15 @@ export class FlyScene extends Phaser.Scene {
   }
 
   create(): void {
+    this.cameras.main
+      .setBounds(0, 0, WIDTH, HEIGHT)
+      .setZoom(3)
+      .centerOn(WIDTH / 2, HEIGHT / 2);
     this.createBackdrop();
     this.shadow = this.add.ellipse(PLAYER_X, 158, 38, 5, 0x553a2c, 0.16);
-    this.player = this.add.image(PLAYER_X, 88, "ornithopter").setDisplaySize(66, 44);
+    this.player = this.add
+      .image(PLAYER_X, 88, "ornithopter")
+      .setDisplaySize(PLAYER_WIDTH, PLAYER_HEIGHT);
     this.player.setOrigin(0.5);
 
     gameEvents.addEventListener("start-run", this.onStartRun);
@@ -59,11 +73,12 @@ export class FlyScene extends Phaser.Scene {
     this.elapsed += dt;
     this.spawnElapsed += dt;
     const targetVelocity = this.mapper.update(this.powerW, delta);
-    const velocityEase = 1 - Math.exp(-delta / 350);
+    const velocityEase = 1 - Math.exp(-delta / this.velocityResponseMs);
     this.velocityY += (targetVelocity - this.velocityY) * velocityEase;
     this.player.y += this.velocityY * dt;
     this.player.rotation = Phaser.Math.Clamp(this.velocityY / 500, -0.25, 0.25);
-    this.player.scaleY = 0.95 + Math.sin(this.elapsed * (5 + this.powerW / 45)) * 0.05;
+    this.player.displayHeight =
+      PLAYER_HEIGHT * (0.95 + Math.sin(this.elapsed * (5 + this.powerW / 45)) * 0.05);
     this.shadow.scaleX = Phaser.Math.Clamp(1.25 - this.player.y / HEIGHT, 0.35, 1);
     this.shadow.alpha = Phaser.Math.Clamp(this.player.y / HEIGHT / 4, 0.05, 0.2);
 
@@ -122,10 +137,15 @@ export class FlyScene extends Phaser.Scene {
   }
 
   private readonly onStartRun = (event: Event): void => {
-    const profile = (event as CustomEvent<CalibrationProfile>).detail;
-    this.mapper = new EffortMapper(profile);
+    const { profile, demo } = (event as CustomEvent<StartRunDetail>).detail;
+    this.mapper = new EffortMapper(profile, demo ? 80 : 500);
+    this.velocityResponseMs = demo ? 120 : 350;
     this.clearObstacles();
-    this.player.setPosition(PLAYER_X, 88).setRotation(0).setVisible(true);
+    this.player
+      .setPosition(PLAYER_X, 88)
+      .setDisplaySize(PLAYER_WIDTH, PLAYER_HEIGHT)
+      .setRotation(0)
+      .setVisible(true);
     this.velocityY = 0;
     this.powerW = profile.cruisePowerW;
     this.lastTelemetryAt = performance.now();

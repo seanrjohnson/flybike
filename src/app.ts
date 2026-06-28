@@ -34,6 +34,7 @@ export class AppController {
   private sourceUnsubscribers: Array<() => void> = [];
   private gameActive = false;
   private countdownActive = false;
+  private demoInputPressed = false;
   private wakeLock?: WakeLockSentinelLike;
   private readonly audio = new GameAudio();
 
@@ -294,7 +295,8 @@ export class AppController {
     this.countdownActive = false;
     this.audio.play("start");
     await this.requestWakeLock();
-    emitGameEvent("start-run", this.profile);
+    if (this.demoSource) this.demoSource.setEffort(this.demoInputPressed ? 1 : 120 / 260);
+    emitGameEvent("start-run", { profile: this.profile, demo: this.source?.kind === "demo" });
     if (this.latestSample.powerW !== undefined) {
       emitGameEvent("telemetry", {
         powerW: this.latestSample.powerW,
@@ -383,6 +385,7 @@ export class AppController {
 
   private bindDemoControls(): void {
     const setPressed = (pressed: boolean): void => {
+      this.demoInputPressed = pressed;
       if (!this.gameActive || !this.demoSource) return;
       this.demoSource.setEffort(pressed ? 1 : 0);
     };
