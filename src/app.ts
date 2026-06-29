@@ -236,7 +236,7 @@ export class AppController {
           <span><strong id="setup-power">${this.latestSample.powerW ?? "—"}</strong> W</span>
           <span><strong id="setup-cadence">${this.latestSample.cadenceRpm?.toFixed(0) ?? "—"}</strong> rpm</span>
         </div>
-        <p>${demo ? "Hold Space, Arrow Up, or the screen to climb. Release to descend." : calibrated ? `Cruise ${this.profile!.cruisePowerW} W · Hard ${this.profile!.hardPowerW} W` : "A short two-effort calibration makes flight respond to you."}</p>
+        <p>${demo ? "Hold Space, Arrow Up, or the screen to climb. Release to descend." : calibrated ? `Cruise near ${this.profile!.cruisePowerW} W to center flight · pedal toward ${this.profile!.hardPowerW} W to climb · ease off to descend.` : "A short two-effort calibration makes flight respond to you."}</p>
         ${loadMarkup}
         <div class="actions">
           ${calibrated ? '<button id="fly-button" class="primary">Start flight</button>' : '<button id="calibrate-button" class="primary">Calibrate effort</button>'}

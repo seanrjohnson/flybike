@@ -26,7 +26,7 @@ ANT+, Wahoo-specific BLE services, and Cycling Power Service sensors are future 
 
 By default the app only reads telemetry. Unless you explicitly apply a supported load in setup, set the bike gearing to a comfortable range and let the trainer use its normal progressive resistance curve.
 
-Trainer gameplay uses a wider cruise-power deadband, larger and slower gates, a gentler maximum vertical speed, and a smaller collision box than keyboard mode. These settings compensate for the physical momentum and reporting delay of a trainer flywheel.
+Trainer gameplay maps sustained effort to a requested altitude: cruise returns toward center, harder pedaling moves the target upward, and easing moves it downward. A wider cruise-power deadband, softened partial effort, bounded movement speed, larger and slower gates, and a smaller collision box compensate for trainer flywheel momentum and reporting delay.
 
 ### Guided traces
 
@@ -71,7 +71,7 @@ The Bluetooth chooser requires a direct user gesture and cannot be automated in 
 - `src/trainer/` contains the transport-neutral `TrainerSource` contract, FTMS adapter, demo adapter, and packet decoder.
 - `src/trainer/ftms-control.ts` contains tested FTMS feature/range parsing and load command encoding.
 - `src/calibration.ts` stores robust per-device cruise/hard effort profiles in local storage.
-- `src/effort.ts` smooths instantaneous power and maps it to vertical target velocity.
+- `src/effort.ts` smooths instantaneous power and maps trainer effort to a bounded target altitude.
 - `src/game/` contains the Phaser scene and original game presentation.
 - `src/app.ts` owns setup, calibration, pause/reconnect, persistence, and DOM UI state.
 

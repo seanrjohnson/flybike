@@ -1,6 +1,6 @@
 import Phaser from "phaser";
 import type { CalibrationProfile } from "../calibration";
-import { EffortMapper } from "../effort";
+import { EffortMapper, TRAINER_VELOCITY_RESPONSE_MS, trainerAltitudeVelocity } from "../effort";
 import { emitGameEvent, gameEvents } from "./events";
 
 type ObstaclePair = {
@@ -89,7 +89,10 @@ export class FlyScene extends Phaser.Scene {
 
     this.elapsed += dt;
     this.spawnElapsed += dt;
-    const targetVelocity = this.mapper.update(this.powerW, delta);
+    const effortVelocity = this.mapper.update(this.powerW, delta);
+    const targetVelocity = this.trainerRun
+      ? this.trainerTargetVelocity(effortVelocity)
+      : effortVelocity;
     const velocityEase = 1 - Math.exp(-delta / this.velocityResponseMs);
     this.velocityY += (targetVelocity - this.velocityY) * velocityEase;
     this.rawPlayerY += this.velocityY * dt;
@@ -172,8 +175,14 @@ export class FlyScene extends Phaser.Scene {
     const { profile, demo, mode } = (event as CustomEvent<StartRunDetail>).detail;
     this.mode = mode;
     this.trainerRun = !demo;
-    this.mapper = new EffortMapper(profile, demo ? 80 : 250, demo ? 90 : 55, demo ? 0 : 0.12);
-    this.velocityResponseMs = demo ? 120 : 240;
+    this.mapper = new EffortMapper(
+      profile,
+      demo ? 80 : 300,
+      demo ? 90 : 55,
+      demo ? 0 : 0.15,
+      demo ? 1 : 1.35,
+    );
+    this.velocityResponseMs = demo ? 120 : TRAINER_VELOCITY_RESPONSE_MS;
     this.clearObstacles();
     this.player
       .setPosition(PLAYER_X, 88)
@@ -241,6 +250,15 @@ export class FlyScene extends Phaser.Scene {
       bottomCap: this.add.rectangle(x, bottomY + 3, width + 7, 6, capColor),
       scored: false,
     });
+  }
+
+  /**
+   * A rider can hold a non-cruise power for seconds, unlike a keyboard player
+   * tapping a key. Treat trainer effort as a requested altitude so flywheel and
+   * telemetry lag cannot keep accelerating the aircraft off screen.
+   */
+  private trainerTargetVelocity(effortVelocity: number): number {
+    return trainerAltitudeVelocity(effortVelocity, this.rawPlayerY);
   }
 
   private collides(): boolean {
