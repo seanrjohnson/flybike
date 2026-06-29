@@ -22,7 +22,7 @@ ANT+, Wahoo-specific BLE services, and Cycling Power Service sensors are future 
 2. Open FlyBike and select **Connect trainer** from a compatible browser.
 3. Select the trainer in the browser device chooser.
 4. Complete the first-use cruise/hard calibration. It is stored locally for that trainer.
-5. Start the flight. Cruise power maintains altitude, greater power climbs, and lower power descends.
+5. Select **Start flight**, choose a level, and begin. Cruise power maintains altitude, greater power climbs, and lower power descends.
 
 By default the app only reads telemetry. Unless you explicitly apply a supported load in setup, set the bike gearing to a comfortable range and let the trainer use its normal progressive resistance curve.
 
@@ -37,6 +37,8 @@ At the end, download the CSV. It contains cue timing, power, cadence, speed, raw
 ### Trainer load
 
 Some FTMS trainers advertise direct resistance control; others advertise simulated grade. When either capability is available, setup shows a bounded load slider. Changing the slider alone does nothing: start at a low value and press **Apply load** to send it. FlyBike requests FTMS control, clamps the command to the advertised/safe range, and requires the trainer to acknowledge it. No load is restored or applied automatically after reconnecting.
+
+During a flight, select the trainer name in the upper-right corner to pause and reopen the same load control. Apply the new setting, then resume after the countdown.
 
 If no load control appears, the trainer did not advertise a compatible FTMS target. Telemetry and gameplay still work normally.
 

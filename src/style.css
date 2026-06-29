@@ -313,11 +313,20 @@ button.primary:focus-visible {
 }
 .connection-pill {
   right: max(6.7rem, calc(env(safe-area-inset-right) + 6.2rem));
+  min-height: 0;
   padding: 0.4rem 0.6rem;
   color: #f5e4b8;
   background: rgba(36, 27, 22, 0.78);
   border: 1px solid #9c7450;
+  box-shadow: none;
   text-transform: uppercase;
+}
+.connection-pill:not(:disabled) {
+  cursor: pointer;
+}
+.connection-pill:disabled {
+  cursor: default;
+  opacity: 1;
 }
 .connection-pill[data-state="connected"] {
   border-color: #91b56b;
@@ -337,6 +346,34 @@ button.primary:focus-visible {
   background: rgba(36, 27, 22, 0.78);
   border: 1px solid #9c7450;
   box-shadow: none;
+}
+
+.level-list {
+  display: grid;
+  gap: 0.8rem;
+  margin-top: 1.25rem;
+}
+
+.level-card {
+  width: 100%;
+  padding: 1rem;
+  text-align: left;
+  background: rgba(222, 199, 156, 0.86);
+}
+
+.level-card strong,
+.level-card span {
+  display: block;
+}
+
+.level-card strong {
+  margin-bottom: 0.25rem;
+  font-family: "Pixelify Sans", monospace;
+  font-size: 1.4rem;
+}
+
+.level-card span {
+  opacity: 0.78;
 }
 
 @media (max-width: 620px) {

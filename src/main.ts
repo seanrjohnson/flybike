@@ -11,7 +11,7 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
       <div class="metric"><strong id="speed-value">—</strong><span>km/h</span></div>
       <div class="metric score"><strong id="score-value">0</strong><span>gates</span></div>
     </div>
-    <div id="connection-pill" class="connection-pill" data-state="disconnected">disconnected</div>
+    <button id="connection-pill" class="connection-pill" data-state="disconnected" type="button" disabled>disconnected</button>
     <button id="mute-button" class="mute-button" type="button">Sound on</button>
     <div id="trace-cue" class="trace-cue hidden" aria-live="polite">
       <strong id="trace-cue-title">Cruise</strong>

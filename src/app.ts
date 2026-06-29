@@ -9,9 +9,24 @@ import { emitGameEvent, gameEvents } from "./game/events";
 import type { TrajectoryPoint } from "./game/FlyScene";
 import { DemoSource } from "./trainer/demo-source";
 import { FtmsBluetoothSource } from "./trainer/ftms-bluetooth-source";
-import type { ConnectionStatus, TelemetrySample, TrainerSource } from "./trainer/types";
+import type {
+  ConnectionStatus,
+  TelemetrySample,
+  TrainerLoadControl,
+  TrainerSource,
+} from "./trainer/types";
 
 const SCORE_KEY = "flybike.highScore.v1";
+
+const LEVELS = [
+  {
+    id: "ornithopter-run",
+    title: "Ornithopter Run",
+    description: "Thread Leonardo's pedal-powered flying machine through an endless gate course.",
+  },
+] as const;
+
+type LevelId = (typeof LEVELS)[number]["id"];
 
 const TRACE_STEPS = [
   { cue: "Cruise", instruction: "Hold your comfortable calibrated effort", durationMs: 10_000 },
@@ -64,6 +79,8 @@ export class AppController {
   private traceGuideTimer?: number;
   private tracePosition?: TrajectoryPoint;
   private wakeLock?: WakeLockSentinelLike;
+  private trainerLoadValue?: number;
+  private selectedLevel: LevelId = LEVELS[0].id;
   private readonly audio = new GameAudio();
 
   private readonly overlay = document.querySelector<HTMLElement>("#overlay")!;
@@ -72,7 +89,7 @@ export class AppController {
   private readonly cadenceValue = document.querySelector<HTMLElement>("#cadence-value")!;
   private readonly speedValue = document.querySelector<HTMLElement>("#speed-value")!;
   private readonly scoreValue = document.querySelector<HTMLElement>("#score-value")!;
-  private readonly connectionPill = document.querySelector<HTMLElement>("#connection-pill")!;
+  private readonly connectionPill = document.querySelector<HTMLButtonElement>("#connection-pill")!;
   private readonly muteButton = document.querySelector<HTMLButtonElement>("#mute-button")!;
   private readonly traceCuePanel = document.querySelector<HTMLElement>("#trace-cue")!;
   private readonly traceCueTitle = document.querySelector<HTMLElement>("#trace-cue-title")!;
@@ -84,6 +101,7 @@ export class AppController {
     this.muteButton.addEventListener("click", () => {
       this.muteButton.textContent = this.audio.toggle() ? "Sound off" : "Sound on";
     });
+    this.connectionPill.addEventListener("click", () => this.showBikeSettings());
     gameEvents.addEventListener("score", (event) => {
       const score = (event as CustomEvent<number>).detail;
       this.scoreValue.textContent = String(score);
@@ -113,6 +131,8 @@ export class AppController {
 
   private showHome(message?: string): void {
     this.gameActive = false;
+    this.traceActive = false;
+    this.updateConnectionPillInteractivity();
     this.hud.classList.add("hidden");
     this.overlay.classList.remove("hidden", "compact");
     const supportsBluetooth = "bluetooth" in navigator;
@@ -167,6 +187,7 @@ export class AppController {
     this.sourceUnsubscribers.forEach((unsubscribe) => unsubscribe());
     this.sourceUnsubscribers = [];
     this.source = source;
+    this.trainerLoadValue = undefined;
     this.sourceUnsubscribers.push(
       source.subscribe((sample) => this.handleTelemetry(sample)),
       source.subscribeStatus((status) => this.handleStatus(status)),
@@ -202,31 +223,39 @@ export class AppController {
   }
 
   private handleStatus(status: ConnectionStatus): void {
+    if (status.state === "disconnected") this.trainerLoadValue = undefined;
     this.connectionPill.dataset.state = status.state;
     this.connectionPill.textContent =
       status.state === "connected" ? (status.deviceName ?? "Connected") : status.state;
+    this.updateConnectionPillInteractivity();
     if ((status.state === "stale" || status.state === "disconnected") && this.gameActive) {
       this.pauseForSignal(status.message);
     }
   }
 
+  private updateConnectionPillInteractivity(): void {
+    const canOpenSettings =
+      this.gameActive &&
+      !this.traceActive &&
+      this.source?.kind === "ftms-bluetooth" &&
+      this.source.getStatus().state === "connected";
+    this.connectionPill.disabled = !canOpenSettings;
+    this.connectionPill.title = canOpenSettings
+      ? "Pause and open bike settings"
+      : "Trainer connection status";
+    this.connectionPill.setAttribute(
+      "aria-label",
+      canOpenSettings
+        ? `${this.connectionPill.textContent ?? "Trainer"}: open bike settings`
+        : "Trainer connection status",
+    );
+  }
+
   private showTrainerReady(status: ConnectionStatus, demo = false): void {
+    this.gameActive = false;
+    this.updateConnectionPillInteractivity();
     const calibrated = Boolean(this.profile);
-    const loadControl = this.source?.getLoadControl();
-    const initialLoad = loadControl
-      ? Math.max(loadControl.minimum, Math.min(loadControl.maximum, 0))
-      : 0;
-    const loadMarkup =
-      !demo && loadControl
-        ? `<div class="load-control">
-            <label for="trainer-load">${escapeHtml(loadControl.label)}: <output id="trainer-load-value">${initialLoad}${escapeHtml(loadControl.unit)}</output></label>
-            <input id="trainer-load" type="range" min="${loadControl.minimum}" max="${loadControl.maximum}" step="${loadControl.increment}" value="${initialLoad}">
-            <button id="apply-load">Apply load</button>
-            <span id="load-status" class="fine-print">Applied only when you press the button; start low.</span>
-          </div>`
-        : !demo
-          ? '<p class="fine-print">This trainer does not advertise compatible FTMS resistance or simulation control.</p>'
-          : "";
+    const loadMarkup = demo ? "" : this.trainerLoadMarkup();
     this.overlay.classList.remove("hidden", "compact");
     this.overlay.innerHTML = `
       <section class="panel" aria-labelledby="ready-title">
@@ -247,15 +276,7 @@ export class AppController {
       </section>`;
     const setupPower = this.overlay.querySelector("#setup-power");
     const setupCadence = this.overlay.querySelector("#setup-cadence");
-    const loadSlider = this.overlay.querySelector<HTMLInputElement>("#trainer-load");
-    const loadValue = this.overlay.querySelector<HTMLOutputElement>("#trainer-load-value");
-    loadSlider?.addEventListener("input", () => {
-      if (loadValue && loadControl)
-        loadValue.textContent = `${loadSlider.value}${loadControl.unit}`;
-    });
-    this.overlay.querySelector("#apply-load")?.addEventListener("click", () => {
-      if (loadSlider) void this.applyTrainerLoad(Number(loadSlider.value));
-    });
+    this.bindTrainerLoadControl();
     const unsubscribe = this.source?.subscribe((sample) => {
       if (setupPower && sample.powerW !== undefined) setupPower.textContent = String(sample.powerW);
       if (setupCadence && sample.cadenceRpm !== undefined)
@@ -263,7 +284,7 @@ export class AppController {
     });
     this.overlay.querySelector("#fly-button")?.addEventListener("click", () => {
       unsubscribe?.();
-      void this.startRun();
+      this.showLevelSelect();
     });
     this.overlay.querySelector("#trace-button")?.addEventListener("click", () => {
       unsubscribe?.();
@@ -284,6 +305,101 @@ export class AppController {
     });
   }
 
+  private trainerLoadMarkup(): string {
+    const loadControl = this.source?.getLoadControl();
+    if (!loadControl) {
+      return '<p class="fine-print">This trainer does not advertise compatible FTMS resistance or simulation control.</p>';
+    }
+    const value = this.currentTrainerLoad(loadControl);
+    return `<div class="load-control">
+      <label for="trainer-load">${escapeHtml(loadControl.label)}: <output id="trainer-load-value">${value}${escapeHtml(loadControl.unit)}</output></label>
+      <input id="trainer-load" type="range" min="${loadControl.minimum}" max="${loadControl.maximum}" step="${loadControl.increment}" value="${value}">
+      <button id="apply-load">Apply load</button>
+      <span id="load-status" class="fine-print">${this.trainerLoadValue === undefined ? "Applied only when you press the button; start low." : "Current setting last acknowledged by the trainer."}</span>
+    </div>`;
+  }
+
+  private currentTrainerLoad(control: TrainerLoadControl): number {
+    const value = this.trainerLoadValue ?? 0;
+    return Math.max(control.minimum, Math.min(control.maximum, value));
+  }
+
+  private bindTrainerLoadControl(): void {
+    const loadControl = this.source?.getLoadControl();
+    const loadSlider = this.overlay.querySelector<HTMLInputElement>("#trainer-load");
+    const loadValue = this.overlay.querySelector<HTMLOutputElement>("#trainer-load-value");
+    loadSlider?.addEventListener("input", () => {
+      if (loadValue && loadControl)
+        loadValue.textContent = `${loadSlider.value}${loadControl.unit}`;
+    });
+    this.overlay.querySelector("#apply-load")?.addEventListener("click", () => {
+      if (loadSlider) void this.applyTrainerLoad(Number(loadSlider.value));
+    });
+  }
+
+  private showLevelSelect(): void {
+    this.gameActive = false;
+    this.updateConnectionPillInteractivity();
+    this.overlay.classList.remove("hidden", "compact");
+    this.overlay.innerHTML = `
+      <section class="panel" aria-labelledby="level-title">
+        <p class="eyebrow">Choose a flight</p>
+        <h2 id="level-title">Select level</h2>
+        <div class="level-list">
+          ${LEVELS.map(
+            (level) => `<button class="level-card" data-level="${level.id}">
+              <strong>${escapeHtml(level.title)}</strong>
+              <span>${escapeHtml(level.description)}</span>
+            </button>`,
+          ).join("")}
+        </div>
+        <div class="actions"><button id="level-back">Back</button></div>
+      </section>`;
+    for (const button of this.overlay.querySelectorAll<HTMLButtonElement>("[data-level]")) {
+      button.addEventListener("click", () => {
+        this.selectedLevel = button.dataset.level as LevelId;
+        void this.startRun();
+      });
+    }
+    this.overlay.querySelector("#level-back")?.addEventListener("click", () => {
+      this.showTrainerReady(
+        this.source?.getStatus() ?? { state: "disconnected" },
+        this.source?.kind === "demo",
+      );
+    });
+  }
+
+  private showBikeSettings(): void {
+    if (
+      !this.gameActive ||
+      this.traceActive ||
+      this.source?.kind !== "ftms-bluetooth" ||
+      this.source.getStatus().state !== "connected"
+    ) {
+      return;
+    }
+    emitGameEvent("pause-run", undefined);
+    this.connectionPill.disabled = true;
+    const status = this.source.getStatus();
+    this.overlay.classList.remove("hidden", "compact");
+    this.overlay.innerHTML = `
+      <section class="panel small-panel" aria-labelledby="bike-settings-title">
+        <p class="eyebrow">Flight paused</p>
+        <h2 id="bike-settings-title">Bike settings</h2>
+        <p>${escapeHtml(status.deviceName ?? "Connected trainer")}</p>
+        ${this.trainerLoadMarkup()}
+        <div class="actions">
+          <button id="resume-button" class="primary">Resume flight</button>
+          <button id="quit-button">Quit</button>
+        </div>
+      </section>`;
+    this.bindTrainerLoadControl();
+    this.overlay
+      .querySelector("#resume-button")
+      ?.addEventListener("click", () => void this.resumeRun());
+    this.overlay.querySelector("#quit-button")?.addEventListener("click", () => this.quitRun());
+  }
+
   private async applyTrainerLoad(value: number): Promise<void> {
     const button = this.overlay.querySelector<HTMLButtonElement>("#apply-load");
     const status = this.overlay.querySelector<HTMLElement>("#load-status");
@@ -291,6 +407,10 @@ export class AppController {
     if (status) status.textContent = "Applying…";
     try {
       await this.source?.setTrainerLoad(value);
+      const loadControl = this.source?.getLoadControl();
+      this.trainerLoadValue = loadControl
+        ? Math.max(loadControl.minimum, Math.min(loadControl.maximum, value))
+        : value;
       if (status) status.textContent = "Trainer acknowledged the new load.";
     } catch (error) {
       if (status)
@@ -392,6 +512,7 @@ export class AppController {
     this.hud.classList.remove("hidden");
     this.gameActive = true;
     this.traceActive = mode === "trace";
+    this.updateConnectionPillInteractivity();
     this.countdownActive = false;
     this.audio.play("start");
     await this.requestWakeLock();
@@ -453,6 +574,7 @@ export class AppController {
     this.overlay.classList.add("hidden");
     await this.countInGame();
     emitGameEvent("resume-run", undefined);
+    this.updateConnectionPillInteractivity();
   }
 
   private async countInGame(): Promise<void> {
@@ -466,25 +588,31 @@ export class AppController {
 
   private async handleGameOver(score: number): Promise<void> {
     this.gameActive = false;
+    this.updateConnectionPillInteractivity();
     await this.releaseWakeLock();
     this.audio.play("crash");
     const previousBest = Number(localStorage.getItem(SCORE_KEY) ?? 0);
     const best = Math.max(score, previousBest);
+    const level = LEVELS.find(({ id }) => id === this.selectedLevel) ?? LEVELS[0];
     localStorage.setItem(SCORE_KEY, String(best));
     this.overlay.classList.remove("hidden");
     this.overlay.innerHTML = `
-      <section class="panel small-panel"><p class="eyebrow">Flight over</p><h2>${score}</h2><p>Best ${best}</p>
-        <div class="actions"><button id="again-button" class="primary">Fly again</button><button id="quit-button">Setup</button></div>
+      <section class="panel small-panel"><p class="eyebrow">${escapeHtml(level.title)} over</p><h2>${score}</h2><p>Best ${best}</p>
+        <div class="actions"><button id="again-button" class="primary">Fly again</button><button id="levels-button">Levels</button><button id="quit-button">Setup</button></div>
       </section>`;
     this.overlay
       .querySelector("#again-button")
       ?.addEventListener("click", () => void this.startRun());
+    this.overlay.querySelector("#levels-button")?.addEventListener("click", () => {
+      this.showLevelSelect();
+    });
     this.overlay.querySelector("#quit-button")?.addEventListener("click", () => this.quitRun());
   }
 
   private quitRun(): void {
     this.gameActive = false;
     this.traceActive = false;
+    this.updateConnectionPillInteractivity();
     this.stopTraceGuide();
     this.traceCuePanel.classList.add("hidden");
     this.hud.classList.add("hidden");
@@ -531,6 +659,7 @@ export class AppController {
     if (!this.traceActive) return;
     this.traceActive = false;
     this.gameActive = false;
+    this.updateConnectionPillInteractivity();
     this.stopTraceGuide();
     this.traceCuePanel.classList.add("hidden");
     this.hud.classList.add("hidden");
