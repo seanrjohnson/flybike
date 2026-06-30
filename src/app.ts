@@ -7,6 +7,7 @@ import {
 import { GameAudio } from "./game/audio";
 import { emitGameEvent, gameEvents } from "./game/events";
 import type { TrajectoryPoint } from "./game/FlyScene";
+import { getLevel, LEVELS, type LevelId } from "./levels";
 import { DemoSource } from "./trainer/demo-source";
 import { FtmsBluetoothSource } from "./trainer/ftms-bluetooth-source";
 import type {
@@ -17,16 +18,6 @@ import type {
 } from "./trainer/types";
 
 const SCORE_KEY = "flybike.highScore.v1";
-
-const LEVELS = [
-  {
-    id: "ornithopter-run",
-    title: "Ornithopter Run",
-    description: "Thread Leonardo's pedal-powered flying machine through an endless gate course.",
-  },
-] as const;
-
-type LevelId = (typeof LEVELS)[number]["id"];
 
 const TRACE_STEPS = [
   { cue: "Cruise", instruction: "Hold your comfortable calibrated effort", durationMs: 10_000 },
@@ -89,6 +80,7 @@ export class AppController {
   private readonly cadenceValue = document.querySelector<HTMLElement>("#cadence-value")!;
   private readonly speedValue = document.querySelector<HTMLElement>("#speed-value")!;
   private readonly scoreValue = document.querySelector<HTMLElement>("#score-value")!;
+  private readonly scoreLabel = document.querySelector<HTMLElement>("#score-label")!;
   private readonly connectionPill = document.querySelector<HTMLButtonElement>("#connection-pill")!;
   private readonly muteButton = document.querySelector<HTMLButtonElement>("#mute-button")!;
   private readonly traceCuePanel = document.querySelector<HTMLElement>("#trace-cue")!;
@@ -512,6 +504,8 @@ export class AppController {
     this.hud.classList.remove("hidden");
     this.gameActive = true;
     this.traceActive = mode === "trace";
+    const levelId: LevelId = mode === "trace" ? "ornithopter-run" : this.selectedLevel;
+    this.scoreLabel.textContent = getLevel(levelId).scoreLabel;
     this.updateConnectionPillInteractivity();
     this.countdownActive = false;
     this.audio.play("start");
@@ -521,6 +515,7 @@ export class AppController {
       profile: this.profile,
       demo: this.source?.kind === "demo",
       mode,
+      levelId,
     });
     if (this.latestSample.powerW !== undefined) {
       emitGameEvent("telemetry", {
@@ -591,10 +586,13 @@ export class AppController {
     this.updateConnectionPillInteractivity();
     await this.releaseWakeLock();
     this.audio.play("crash");
-    const previousBest = Number(localStorage.getItem(SCORE_KEY) ?? 0);
+    const scoreKey = `${SCORE_KEY}.${this.selectedLevel}`;
+    const legacyBest =
+      this.selectedLevel === "ornithopter-run" ? localStorage.getItem(SCORE_KEY) : null;
+    const previousBest = Number(localStorage.getItem(scoreKey) ?? legacyBest ?? 0);
     const best = Math.max(score, previousBest);
-    const level = LEVELS.find(({ id }) => id === this.selectedLevel) ?? LEVELS[0];
-    localStorage.setItem(SCORE_KEY, String(best));
+    const level = getLevel(this.selectedLevel);
+    localStorage.setItem(scoreKey, String(best));
     this.overlay.classList.remove("hidden");
     this.overlay.innerHTML = `
       <section class="panel small-panel"><p class="eyebrow">${escapeHtml(level.title)} over</p><h2>${score}</h2><p>Best ${best}</p>

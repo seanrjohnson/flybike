@@ -9,7 +9,7 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
       <div class="metric"><strong id="power-value">—</strong><span>watts</span></div>
       <div class="metric"><strong id="cadence-value">—</strong><span>rpm</span></div>
       <div class="metric"><strong id="speed-value">—</strong><span>km/h</span></div>
-      <div class="metric score"><strong id="score-value">0</strong><span>gates</span></div>
+      <div class="metric score"><strong id="score-value">0</strong><span id="score-label">gates</span></div>
     </div>
     <button id="connection-pill" class="connection-pill" data-state="disconnected" type="button" disabled>disconnected</button>
     <button id="mute-button" class="mute-button" type="button">Sound on</button>

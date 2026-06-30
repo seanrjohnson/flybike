@@ -25,6 +25,15 @@ test("returns from level selection to controller setup", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Demo controls" })).toBeVisible();
 });
 
+test("starts the Asteroids level with its own score label", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Play with keys / touch" }).click();
+  await page.getByRole("button", { name: "Start flight" }).click();
+  await page.getByRole("button", { name: /Asteroids/ }).click();
+  await expect(page.locator("#hud")).toBeVisible({ timeout: 5_000 });
+  await expect(page.locator("#score-label")).toHaveText("asteroids");
+});
+
 test("persists the mute preference", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "Sound on" }).click();

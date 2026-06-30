@@ -28,6 +28,13 @@ By default the app only reads telemetry. Unless you explicitly apply a supported
 
 Trainer gameplay maps sustained effort to a requested altitude: cruise returns toward center, harder pedaling moves the target upward, and easing moves it downward. A wider cruise-power deadband, softened partial effort, bounded movement speed, larger and slower gates, and a smaller collision box compensate for trainer flywheel momentum and reporting delay.
 
+### Levels
+
+- **Ornithopter Run** is the original endless gate course.
+- **Asteroids** replaces the landscape with a moving starfield. Dodge incoming asteroids by pedaling higher or easing lower as the field accelerates.
+
+Each level keeps a separate high score. The level catalog lives in `src/levels.ts`; gameplay-specific obstacle and backdrop behavior lives in the Phaser scene.
+
 ### Guided traces
 
 After connecting and calibrating a trainer, select **Guided trace** to run a one-minute obstacle-free session. Follow the on-screen cruise, push, easy, and coast cues. The bike remains visible at the edge of the screen, but the exported trajectory is not clamped by a roof or floor.
