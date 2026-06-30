@@ -8,8 +8,10 @@ import { GameAudio } from "./game/audio";
 import { emitGameEvent, gameEvents } from "./game/events";
 import type { TrajectoryPoint } from "./game/FlyScene";
 import { getLevel, LEVELS, type LevelId } from "./levels";
+import { formatRunTime, formatSessionMinutes, RideStats } from "./ride-stats";
 import { DemoSource } from "./trainer/demo-source";
 import { FtmsBluetoothSource } from "./trainer/ftms-bluetooth-source";
+import { terrainLoadTarget } from "./trainer/terrain-load";
 import type {
   ConnectionStatus,
   TelemetrySample,
@@ -72,6 +74,13 @@ export class AppController {
   private wakeLock?: WakeLockSentinelLike;
   private trainerLoadValue?: number;
   private selectedLevel: LevelId = LEVELS[0].id;
+  private terrainResistanceScale = 1;
+  private terrainLoadBusy = false;
+  private pendingTerrainGrade?: number;
+  private lastTerrainLoadValue?: number;
+  private terrainRestoreRequested = false;
+  private terrainLoadFailed = false;
+  private readonly rideStats = new RideStats();
   private readonly audio = new GameAudio();
 
   private readonly overlay = document.querySelector<HTMLElement>("#overlay")!;
@@ -81,6 +90,11 @@ export class AppController {
   private readonly speedValue = document.querySelector<HTMLElement>("#speed-value")!;
   private readonly scoreValue = document.querySelector<HTMLElement>("#score-value")!;
   private readonly scoreLabel = document.querySelector<HTMLElement>("#score-label")!;
+  private readonly rideStatsPanel = document.querySelector<HTMLElement>("#ride-stats")!;
+  private readonly runTime = document.querySelector<HTMLElement>("#run-time")!;
+  private readonly sessionTime = document.querySelector<HTMLElement>("#session-time")!;
+  private readonly runDistance = document.querySelector<HTMLElement>("#run-distance")!;
+  private readonly sessionDistance = document.querySelector<HTMLElement>("#session-distance")!;
   private readonly connectionPill = document.querySelector<HTMLButtonElement>("#connection-pill")!;
   private readonly muteButton = document.querySelector<HTMLButtonElement>("#mute-button")!;
   private readonly traceCuePanel = document.querySelector<HTMLElement>("#trace-cue")!;
@@ -106,6 +120,10 @@ export class AppController {
     gameEvents.addEventListener("trajectory", (event) => {
       this.tracePosition = (event as CustomEvent<TrajectoryPoint>).detail;
     });
+    gameEvents.addEventListener("terrain-grade", (event) => {
+      const { gradePercent } = (event as CustomEvent<{ gradePercent: number }>).detail;
+      this.handleTerrainGrade(gradePercent);
+    });
     gameEvents.addEventListener("signal-returned", () => {
       if (this.gameActive) this.showPause("Signal restored", "Resume when you are ready.");
     });
@@ -117,6 +135,7 @@ export class AppController {
     document.querySelector("#trace-cancel")?.addEventListener("click", () => {
       void this.finishTrace("Trace ended early.");
     });
+    window.setInterval(() => this.tickRideStats(), 250);
     this.bindDemoControls();
     this.showHome();
   }
@@ -124,6 +143,8 @@ export class AppController {
   private showHome(message?: string): void {
     this.gameActive = false;
     this.traceActive = false;
+    this.pauseRideStats();
+    this.rideStatsPanel.classList.add("hidden");
     this.updateConnectionPillInteractivity();
     this.hud.classList.add("hidden");
     this.overlay.classList.remove("hidden", "compact");
@@ -180,6 +201,8 @@ export class AppController {
     this.sourceUnsubscribers = [];
     this.source = source;
     this.trainerLoadValue = undefined;
+    this.rideStats.resetSession();
+    this.renderRideStats();
     this.sourceUnsubscribers.push(
       source.subscribe((sample) => this.handleTelemetry(sample)),
       source.subscribeStatus((status) => this.handleStatus(status)),
@@ -214,8 +237,43 @@ export class AppController {
     }
   }
 
+  private beginRideStats(): void {
+    this.rideStats.beginRun(performance.now());
+    this.rideStatsPanel.classList.remove("hidden");
+    this.renderRideStats();
+  }
+
+  private pauseRideStats(): void {
+    this.rideStats.pause(performance.now(), this.latestSample.speedKph ?? 0);
+    this.renderRideStats();
+  }
+
+  private resumeRideStats(): void {
+    this.rideStats.resume(performance.now());
+    this.rideStatsPanel.classList.remove("hidden");
+    this.renderRideStats();
+  }
+
+  private tickRideStats(): void {
+    this.rideStats.tick(performance.now(), this.latestSample.speedKph ?? 0);
+    this.renderRideStats();
+  }
+
+  private renderRideStats(): void {
+    const stats = this.rideStats.getSnapshot();
+    this.runTime.textContent = formatRunTime(stats.runElapsedMs);
+    this.sessionTime.textContent = formatSessionMinutes(stats.sessionElapsedMs);
+    this.runDistance.textContent = stats.runDistanceKm.toFixed(2);
+    this.sessionDistance.textContent = stats.sessionDistanceKm.toFixed(2);
+  }
+
   private handleStatus(status: ConnectionStatus): void {
-    if (status.state === "disconnected") this.trainerLoadValue = undefined;
+    if (status.state === "disconnected") {
+      this.trainerLoadValue = undefined;
+      this.pendingTerrainGrade = undefined;
+      this.lastTerrainLoadValue = undefined;
+      this.terrainLoadBusy = false;
+    }
     this.connectionPill.dataset.state = status.state;
     this.connectionPill.textContent =
       status.state === "connected" ? (status.deviceName ?? "Connected") : status.state;
@@ -245,6 +303,8 @@ export class AppController {
 
   private showTrainerReady(status: ConnectionStatus, demo = false): void {
     this.gameActive = false;
+    this.pauseRideStats();
+    this.rideStatsPanel.classList.add("hidden");
     this.updateConnectionPillInteractivity();
     const calibrated = Boolean(this.profile);
     const loadMarkup = demo ? "" : this.trainerLoadMarkup();
@@ -331,6 +391,8 @@ export class AppController {
 
   private showLevelSelect(): void {
     this.gameActive = false;
+    this.pauseRideStats();
+    this.rideStatsPanel.classList.add("hidden");
     this.updateConnectionPillInteractivity();
     this.overlay.classList.remove("hidden", "compact");
     this.overlay.innerHTML = `
@@ -350,7 +412,8 @@ export class AppController {
     for (const button of this.overlay.querySelectorAll<HTMLButtonElement>("[data-level]")) {
       button.addEventListener("click", () => {
         this.selectedLevel = button.dataset.level as LevelId;
-        void this.startRun();
+        if (this.selectedLevel === "hill-climber") this.showHillClimberSetup();
+        else void this.startRun();
       });
     }
     this.overlay.querySelector("#level-back")?.addEventListener("click", () => {
@@ -358,6 +421,40 @@ export class AppController {
         this.source?.getStatus() ?? { state: "disconnected" },
         this.source?.kind === "demo",
       );
+    });
+  }
+
+  private showHillClimberSetup(): void {
+    this.rideStatsPanel.classList.add("hidden");
+    const loadControl =
+      this.source?.kind === "ftms-bluetooth" ? this.source.getLoadControl() : undefined;
+    const supportsTerrainLoad = Boolean(loadControl);
+    const selectedScale = supportsTerrainLoad ? this.terrainResistanceScale : 0;
+    this.overlay.classList.remove("hidden", "compact");
+    this.overlay.innerHTML = `
+      <section class="panel" aria-labelledby="hill-setup-title">
+        <p class="eyebrow">Hill Climber</p>
+        <h2 id="hill-setup-title">Terrain setup</h2>
+        <p>Virtual slope physics are always active: climbs demand more watts, while descents reward coasting and high-speed pedaling.</p>
+        <div class="load-control">
+          <label for="terrain-resistance">Physical terrain resistance</label>
+          <select id="terrain-resistance" ${supportsTerrainLoad ? "" : "disabled"}>
+            ${this.terrainEffectOptions(selectedScale)}
+          </select>
+          <span class="fine-print">${supportsTerrainLoad ? `Starting the level will automatically vary ${escapeHtml(loadControl!.label.toLowerCase())} with the slope. Your manual setting remains the baseline.` : "This controller does not expose compatible automatic FTMS load control."}</span>
+        </div>
+        <div class="actions">
+          <button id="start-hill" class="primary">Start climb</button>
+          <button id="hill-back">Levels</button>
+        </div>
+      </section>`;
+    this.overlay.querySelector("#start-hill")?.addEventListener("click", () => {
+      const select = this.overlay.querySelector<HTMLSelectElement>("#terrain-resistance");
+      this.terrainResistanceScale = supportsTerrainLoad ? Number(select?.value ?? 0) : 0;
+      void this.startRun();
+    });
+    this.overlay.querySelector("#hill-back")?.addEventListener("click", () => {
+      this.showLevelSelect();
     });
   }
 
@@ -370,6 +467,8 @@ export class AppController {
     ) {
       return;
     }
+    this.restoreTerrainLoad();
+    this.pauseRideStats();
     emitGameEvent("pause-run", undefined);
     this.connectionPill.disabled = true;
     const status = this.source.getStatus();
@@ -380,16 +479,52 @@ export class AppController {
         <h2 id="bike-settings-title">Bike settings</h2>
         <p>${escapeHtml(status.deviceName ?? "Connected trainer")}</p>
         ${this.trainerLoadMarkup()}
+        ${this.selectedLevel === "hill-climber" ? this.inGameTerrainEffectMarkup() : ""}
         <div class="actions">
           <button id="resume-button" class="primary">Resume flight</button>
           <button id="quit-button">Quit</button>
         </div>
       </section>`;
     this.bindTrainerLoadControl();
+    this.bindInGameTerrainEffectControl();
     this.overlay
       .querySelector("#resume-button")
       ?.addEventListener("click", () => void this.resumeRun());
     this.overlay.querySelector("#quit-button")?.addEventListener("click", () => this.quitRun());
+  }
+
+  private terrainEffectOptions(selectedScale: number): string {
+    return [
+      [0, "Off"],
+      [0.5, "Gentle"],
+      [1, "Standard"],
+      [1.5, "Strong"],
+    ]
+      .map(
+        ([value, label]) =>
+          `<option value="${value}" ${selectedScale === value ? "selected" : ""}>${label}</option>`,
+      )
+      .join("");
+  }
+
+  private inGameTerrainEffectMarkup(): string {
+    const supported = Boolean(this.source?.getLoadControl());
+    return `<div class="load-control">
+      <label for="terrain-resistance">Terrain resistance effect</label>
+      <select id="terrain-resistance" ${supported ? "" : "disabled"}>
+        ${this.terrainEffectOptions(supported ? this.terrainResistanceScale : 0)}
+      </select>
+      <span class="fine-print">Changes take effect when the climb resumes.</span>
+    </div>`;
+  }
+
+  private bindInGameTerrainEffectControl(): void {
+    this.overlay
+      .querySelector<HTMLSelectElement>("#terrain-resistance")
+      ?.addEventListener("change", (event) => {
+        this.terrainResistanceScale = Number((event.currentTarget as HTMLSelectElement).value);
+        if (this.terrainResistanceScale === 0) this.restoreTerrainLoad();
+      });
   }
 
   private async applyTrainerLoad(value: number): Promise<void> {
@@ -411,6 +546,88 @@ export class AppController {
     } finally {
       if (button) button.disabled = false;
     }
+  }
+
+  private handleTerrainGrade(gradePercent: number): void {
+    if (
+      !this.gameActive ||
+      this.selectedLevel !== "hill-climber" ||
+      this.terrainResistanceScale <= 0 ||
+      this.terrainLoadFailed ||
+      this.source?.kind !== "ftms-bluetooth" ||
+      !this.source.getLoadControl()
+    ) {
+      return;
+    }
+    this.pendingTerrainGrade = gradePercent;
+    void this.flushTerrainLoad();
+  }
+
+  private async flushTerrainLoad(): Promise<void> {
+    if (this.terrainLoadBusy || this.pendingTerrainGrade === undefined) return;
+    const source = this.source;
+    const control = source?.getLoadControl();
+    if (!source || !control) return;
+    const grade = this.pendingTerrainGrade;
+    this.pendingTerrainGrade = undefined;
+    const target = terrainLoadTarget(
+      control,
+      this.currentTrainerLoad(control),
+      grade,
+      this.terrainResistanceScale,
+    );
+    if (
+      this.lastTerrainLoadValue !== undefined &&
+      Math.abs(target - this.lastTerrainLoadValue) < control.increment * 0.5
+    ) {
+      return;
+    }
+
+    this.terrainLoadBusy = true;
+    // A timeout is ambiguous: the trainer may have applied the command without
+    // delivering its acknowledgement. Remember the target before writing so a
+    // pause or failure still attempts to restore the manual baseline.
+    this.lastTerrainLoadValue = target;
+    try {
+      await source.setTrainerLoad(target);
+    } catch (error) {
+      this.terrainLoadFailed = true;
+      this.terrainRestoreRequested = true;
+      console.warn("Automatic terrain resistance was disabled for this run.", error);
+      if (this.gameActive && this.selectedLevel === "hill-climber") {
+        this.showPause(
+          "Terrain resistance unavailable",
+          "The trainer did not acknowledge the load change. Virtual hill physics will continue with automatic resistance off.",
+        );
+      }
+    } finally {
+      this.terrainLoadBusy = false;
+      if (this.terrainRestoreRequested) this.restoreTerrainLoad();
+      else if (this.pendingTerrainGrade !== undefined) void this.flushTerrainLoad();
+    }
+  }
+
+  private restoreTerrainLoad(): void {
+    this.pendingTerrainGrade = undefined;
+    if (this.terrainLoadBusy) {
+      this.terrainRestoreRequested = true;
+      return;
+    }
+    if (this.lastTerrainLoadValue === undefined) return;
+    const source = this.source;
+    const control = source?.getLoadControl();
+    this.terrainRestoreRequested = false;
+    this.lastTerrainLoadValue = undefined;
+    if (!source || !control || source.getStatus().state !== "connected") return;
+    const base = this.currentTrainerLoad(control);
+    this.terrainLoadBusy = true;
+    void source
+      .setTrainerLoad(base)
+      .catch((error: unknown) => console.warn("Could not restore the manual trainer load.", error))
+      .finally(() => {
+        this.terrainLoadBusy = false;
+        if (this.pendingTerrainGrade !== undefined) void this.flushTerrainLoad();
+      });
   }
 
   private async runCalibration(): Promise<void> {
@@ -492,6 +709,9 @@ export class AppController {
 
   private async startRun(mode: "game" | "trace" = "game"): Promise<void> {
     if (!this.profile || this.countdownActive) return;
+    this.terrainLoadFailed = false;
+    this.terrainRestoreRequested = false;
+    if (this.selectedLevel !== "hill-climber") this.restoreTerrainLoad();
     this.countdownActive = true;
     this.overlay.classList.remove("hidden");
     this.overlay.classList.add("compact");
@@ -511,6 +731,7 @@ export class AppController {
     this.audio.play("start");
     await this.requestWakeLock();
     if (this.demoSource) this.demoSource.setEffort(this.demoInputPressed ? 1 : 120 / 260);
+    this.beginRideStats();
     emitGameEvent("start-run", {
       profile: this.profile,
       demo: this.source?.kind === "demo",
@@ -537,6 +758,8 @@ export class AppController {
   }
 
   private showPause(title: string, message: string): void {
+    this.restoreTerrainLoad();
+    this.pauseRideStats();
     emitGameEvent("pause-run", undefined);
     const needsReconnect =
       this.source?.kind === "ftms-bluetooth" && this.source.getStatus().state !== "connected";
@@ -569,6 +792,7 @@ export class AppController {
     this.overlay.classList.add("hidden");
     await this.countInGame();
     emitGameEvent("resume-run", undefined);
+    this.resumeRideStats();
     this.updateConnectionPillInteractivity();
   }
 
@@ -583,6 +807,8 @@ export class AppController {
 
   private async handleGameOver(score: number): Promise<void> {
     this.gameActive = false;
+    this.pauseRideStats();
+    this.restoreTerrainLoad();
     this.updateConnectionPillInteractivity();
     await this.releaseWakeLock();
     this.audio.play("crash");
@@ -610,6 +836,9 @@ export class AppController {
   private quitRun(): void {
     this.gameActive = false;
     this.traceActive = false;
+    this.pauseRideStats();
+    this.rideStatsPanel.classList.add("hidden");
+    this.restoreTerrainLoad();
     this.updateConnectionPillInteractivity();
     this.stopTraceGuide();
     this.traceCuePanel.classList.add("hidden");
@@ -657,6 +886,7 @@ export class AppController {
     if (!this.traceActive) return;
     this.traceActive = false;
     this.gameActive = false;
+    this.pauseRideStats();
     this.updateConnectionPillInteractivity();
     this.stopTraceGuide();
     this.traceCuePanel.classList.add("hidden");

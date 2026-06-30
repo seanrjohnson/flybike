@@ -24,14 +24,18 @@ ANT+, Wahoo-specific BLE services, and Cycling Power Service sensors are future 
 4. Complete the first-use cruise/hard calibration. It is stored locally for that trainer.
 5. Select **Start flight**, choose a level, and begin. Cruise power maintains altitude, greater power climbs, and lower power descends.
 
-By default the app only reads telemetry. Unless you explicitly apply a supported load in setup, set the bike gearing to a comfortable range and let the trainer use its normal progressive resistance curve.
+Outside the explicitly enabled Hill Climber terrain effect, the app only reads telemetry unless you apply a supported load yourself. Set the bike gearing to a comfortable range and let the trainer use its normal progressive resistance curve when load control is off.
 
 Trainer gameplay maps sustained effort to a requested altitude: cruise returns toward center, harder pedaling moves the target upward, and easing moves it downward. A wider cruise-power deadband, softened partial effort, bounded movement speed, larger and slower gates, and a smaller collision box compensate for trainer flywheel momentum and reporting delay.
+
+The lower-left ride display shows active run time as minutes and seconds, with accumulated session minutes in parentheses. Distance is integrated from trainer-reported speed and shown in kilometers for the current run and controller session. Countdown, menu, and paused time are excluded; choosing a new controller starts a new session.
 
 ### Levels
 
 - **Ornithopter Run** is the original endless gate course.
 - **Asteroids** replaces the landscape with a moving starfield. Dodge incoming asteroids by pedaling higher or easing lower as the field accelerates.
+- **Racer** is a fixed-screen overhead circuit inspired by classic arcade sprint racing. Steering is automatic; harder pedaling accelerates and moves toward the outer racing line, while easing slows and moves inward. Avoid rival cars and complete laps.
+- **Hill Climber** is an endless procedurally generated side-scrolling landscape. Uphill grades require additional watts to hold speed. Downhills support coasting, and pedaling downhill produces a large speed boost.
 
 Each level keeps a separate high score. The level catalog lives in `src/levels.ts`; gameplay-specific obstacle and backdrop behavior lives in the Phaser scene.
 
@@ -46,6 +50,8 @@ At the end, download the CSV. It contains cue timing, power, cadence, speed, raw
 Some FTMS trainers advertise direct resistance control; others advertise simulated grade. When either capability is available, setup shows a bounded load slider. Changing the slider alone does nothing: start at a low value and press **Apply load** to send it. FlyBike requests FTMS control, clamps the command to the advertised/safe range, and requires the trainer to acknowledge it. No load is restored or applied automatically after reconnecting.
 
 During a flight, select the trainer name in the upper-right corner to pause and reopen the same load control. Apply the new setting, then resume after the countdown.
+
+Hill Climber can also vary compatible FTMS resistance automatically with terrain. Before starting, choose Off, Gentle, Standard, or Strong. Virtual slope physics remain active in every setting. Automatic commands are throttled, use the manually applied load as their baseline, and restore that baseline when the game pauses or ends. The terrain effect can also be changed from the in-game bike settings screen.
 
 If no load control appears, the trainer did not advertise a compatible FTMS target. Telemetry and gameplay still work normally.
 
@@ -81,6 +87,8 @@ The Bluetooth chooser requires a direct user gesture and cannot be automated in 
 - `src/trainer/ftms-control.ts` contains tested FTMS feature/range parsing and load command encoding.
 - `src/calibration.ts` stores robust per-device cruise/hard effort profiles in local storage.
 - `src/effort.ts` smooths instantaneous power and maps trainer effort to a bounded target altitude.
+- `src/game/hill-physics.ts` defines testable terrain, grade, and hill-speed behavior.
+- `src/trainer/terrain-load.ts` maps terrain grade to bounded, stepped FTMS load targets.
 - `src/game/` contains the Phaser scene and original game presentation.
 - `src/app.ts` owns setup, calibration, pause/reconnect, persistence, and DOM UI state.
 

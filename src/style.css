@@ -25,7 +25,8 @@ body {
   touch-action: none;
 }
 button,
-input {
+input,
+select {
   font: inherit;
 }
 button {
@@ -192,6 +193,7 @@ button.primary:focus-visible {
 
 .load-control label,
 .load-control input,
+.load-control select,
 .load-control .fine-print {
   grid-column: 1 / -1;
 }
@@ -203,6 +205,15 @@ button.primary:focus-visible {
 .load-control input {
   width: 100%;
   accent-color: #8e4937;
+}
+
+.load-control select {
+  width: 100%;
+  min-height: 2.6rem;
+  padding: 0.45rem 0.6rem;
+  color: #3d291f;
+  background: #f4e4bd;
+  border: 1px solid #72513b;
 }
 .progress {
   height: 0.8rem;
@@ -303,6 +314,44 @@ button.primary:focus-visible {
   border-color: #f0cc74;
 }
 
+.ride-stats {
+  position: absolute;
+  z-index: 3;
+  bottom: max(0.6rem, env(safe-area-inset-bottom));
+  left: max(0.6rem, env(safe-area-inset-left));
+  min-width: 12.5rem;
+  padding: 0.4rem 0.6rem;
+  color: #fff0c4;
+  background: rgba(44, 29, 23, 0.82);
+  border: 1px solid #d2ac6d;
+  font-family: "Pixelify Sans", monospace;
+  font-size: clamp(0.72rem, 2vw, 0.9rem);
+  line-height: 1.35;
+  pointer-events: none;
+}
+
+.ride-stats > div {
+  display: flex;
+  align-items: baseline;
+  gap: 0.3rem;
+}
+
+.ride-stats > div > span:first-child {
+  min-width: 4.2rem;
+  opacity: 0.7;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+}
+
+.ride-stats strong {
+  font-size: 1rem;
+}
+
+.ride-stats small {
+  opacity: 0.72;
+  font-size: 0.72rem;
+}
+
 .connection-pill,
 .mute-button {
   position: absolute;
@@ -379,7 +428,7 @@ button.primary:focus-visible {
 @media (max-width: 620px) {
   .hud {
     top: auto;
-    bottom: max(0.5rem, env(safe-area-inset-bottom));
+    bottom: max(4rem, calc(env(safe-area-inset-bottom) + 3.5rem));
     right: 0.5rem;
     justify-content: center;
   }
@@ -393,6 +442,10 @@ button.primary:focus-visible {
   }
   .panel h1 {
     font-size: 4.2rem;
+  }
+  .ride-stats {
+    right: max(0.6rem, env(safe-area-inset-right));
+    min-width: 0;
   }
 }
 

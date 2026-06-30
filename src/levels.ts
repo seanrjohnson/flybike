@@ -11,6 +11,20 @@ export const LEVELS = [
     description: "Pedal higher or ease lower to dodge an accelerating field of space rocks.",
     scoreLabel: "asteroids",
   },
+  {
+    id: "racer",
+    title: "Racer",
+    description:
+      "Race an overhead circuit: pedal harder for speed and the outer line; ease for the inside.",
+    scoreLabel: "laps",
+  },
+  {
+    id: "hill-climber",
+    title: "Hill Climber",
+    description:
+      "Ride an endless side-scrolling landscape where every slope changes the power needed for speed.",
+    scoreLabel: "km",
+  },
 ] as const;
 
 export type LevelId = (typeof LEVELS)[number]["id"];

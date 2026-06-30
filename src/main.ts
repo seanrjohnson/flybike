@@ -11,6 +11,10 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
       <div class="metric"><strong id="speed-value">—</strong><span>km/h</span></div>
       <div class="metric score"><strong id="score-value">0</strong><span id="score-label">gates</span></div>
     </div>
+    <div id="ride-stats" class="ride-stats hidden" aria-label="Ride statistics">
+      <div><span>Time</span> <strong id="run-time">00:00</strong> <small>(<span id="session-time">0</span> min)</small></div>
+      <div><span>Distance</span> <strong id="run-distance">0.00</strong> km <small>(<span id="session-distance">0.00</span> km)</small></div>
+    </div>
     <button id="connection-pill" class="connection-pill" data-state="disconnected" type="button" disabled>disconnected</button>
     <button id="mute-button" class="mute-button" type="button">Sound on</button>
     <div id="trace-cue" class="trace-cue hidden" aria-live="polite">
