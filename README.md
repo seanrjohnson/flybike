@@ -71,6 +71,10 @@ If the trainer disconnects or stops reporting data, the game pauses. Reconnect o
 
 Demo mode uses `Space`, `ArrowUp`, or press-and-hold anywhere outside a button to climb. Release to descend.
 
+### Ride controllers
+
+Select **Connect controller** on the home screen to pair an [OpenBikeControl](https://github.com/OpenBikeControl/openbikecontrol-protocol) remote alongside the trainer. During a flight, Menu or Pause opens the game menu, and in demo mode Shift Up, Up, or Increase Difficulty climbs while held. On setup and pause screens, Up/Left/Shift Up and Down/Right/Shift Down move between buttons, and Select or Resume presses the focused or highlighted button. Connecting a trainer or another controller still requires a click or tap.
+
 ## Development
 
 Prerequisites: Node.js 22 and npm.
@@ -101,6 +105,7 @@ The Bluetooth chooser requires a direct user gesture and cannot be automated in 
 - `src/effort.ts` smooths instantaneous power and maps trainer effort to a bounded target altitude.
 - `src/game/hill-physics.ts` defines testable terrain, grade, and hill-speed behavior.
 - `src/trainer/terrain-load.ts` maps terrain grade to bounded, stepped FTMS load targets.
+- `src/trainer/openbikecontrol.ts` decodes OpenBikeControl button messages and picks one game action per press.
 - `src/game/` contains the Phaser scene and original game presentation.
 - `src/app.ts` owns setup, calibration, pause/reconnect, persistence, and DOM UI state.
 

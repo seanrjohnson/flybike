@@ -35,6 +35,8 @@ import {
 } from "./ride-history";
 import { DemoSource } from "./trainer/demo-source";
 import { FtmsBluetoothSource } from "./trainer/ftms-bluetooth-source";
+import { pickControllerAction } from "./trainer/openbikecontrol";
+import { OpenBikeControlBluetooth } from "./trainer/openbikecontrol-bluetooth";
 import { terrainLoadTarget } from "./trainer/terrain-load";
 import type {
   ConnectionStatus,
@@ -44,6 +46,14 @@ import type {
 } from "./trainer/types";
 
 const SCORE_KEY = "flybike.highScore.v1";
+
+// Bluetooth choosers and file pickers need a real click or tap, not a controller press.
+const GESTURE_BUTTONS = new Set([
+  "connect-button",
+  "controller-button",
+  "reconnect-button",
+  "history-import-button",
+]);
 
 const TRACE_STEPS = [
   { cue: "Cruise", instruction: "Hold your comfortable calibrated effort", durationMs: 10_000 },
@@ -89,6 +99,7 @@ export class AppController {
   private gameActive = false;
   private countdownActive = false;
   private demoInputPressed = false;
+  private controllerClimbIds: number[] = [];
   private traceActive = false;
   private traceRecords: TraceRecord[] = [];
   private traceStartedAt = 0;
@@ -113,6 +124,10 @@ export class AppController {
   private ridePowerCurve: PowerPoint[] = [];
   private lastHistoryPowerAt = 0;
   private readonly audio = new GameAudio();
+  private readonly controller = new OpenBikeControlBluetooth(
+    (pressedIds) => this.handleControllerButtons(pressedIds),
+    (status) => this.renderControllerStatus(status),
+  );
 
   private readonly overlay = document.querySelector<HTMLElement>("#overlay")!;
   private readonly hud = document.querySelector<HTMLElement>("#hud")!;
@@ -199,8 +214,10 @@ export class AppController {
         <div class="actions">
           <button id="connect-button" class="primary" ${supportsBluetooth ? "" : "disabled"}>Connect trainer</button>
           <button id="demo-button">Play with keys / touch</button>
+          <button id="controller-button" ${supportsBluetooth ? "" : "disabled"}>Connect controller</button>
           <button id="history-button">Ride history</button>
         </div>
+        <p id="controller-status" class="fine-print"></p>
         <p class="fine-print">Bluetooth requires Chrome or Edge on desktop/Android. Close other trainer apps first.</p>
       </section>`;
     this.overlay
@@ -210,8 +227,62 @@ export class AppController {
       .querySelector("#demo-button")
       ?.addEventListener("click", () => void this.startDemo());
     this.overlay
+      .querySelector("#controller-button")
+      ?.addEventListener("click", () => void this.controller.connect());
+    this.overlay
       .querySelector("#history-button")
       ?.addEventListener("click", () => this.showRideHistory());
+    this.renderControllerStatus(this.controller.getStatus());
+  }
+
+  private renderControllerStatus(status: ConnectionStatus): void {
+    const label = this.overlay.querySelector("#controller-status");
+    if (!label) return;
+    // Device names come from Bluetooth, so they are only ever set as text.
+    label.textContent =
+      status.state === "connected"
+        ? `Controller: ${status.deviceName ?? "connected"}`
+        : (status.message ??
+          "Optional OpenBikeControl remote: pause, pick menu buttons, and climb in demo mode.");
+  }
+
+  private handleControllerButtons(pressedIds: number[]): void {
+    if (
+      this.controllerClimbIds.length &&
+      !this.controllerClimbIds.some((id) => this.controller.isHeld(id))
+    ) {
+      this.controllerClimbIds = [];
+      this.setDemoInputPressed(false);
+    }
+    const inFlight = this.gameActive && !this.runPanelOpen && !this.countdownActive;
+    const action = pickControllerAction(pressedIds, inFlight);
+    if (action === "climb") {
+      this.controllerClimbIds = pressedIds;
+      this.setDemoInputPressed(true);
+    } else if (action === "menu") this.showGameMenu();
+    else if (action === "previous") this.moveOverlayFocus(-1);
+    else if (action === "next") this.moveOverlayFocus(1);
+    else if (action === "confirm") {
+      const buttons = this.overlayButtons();
+      const button =
+        buttons.find((candidate) => candidate === document.activeElement) ??
+        buttons.find((candidate) => candidate.classList.contains("primary"));
+      if (button && !GESTURE_BUTTONS.has(button.id)) button.click();
+    }
+  }
+
+  private overlayButtons(): HTMLButtonElement[] {
+    if (this.overlay.classList.contains("hidden")) return [];
+    return [...this.overlay.querySelectorAll<HTMLButtonElement>("button:not(:disabled)")];
+  }
+
+  private moveOverlayFocus(step: number): void {
+    const buttons = this.overlayButtons();
+    if (!buttons.length) return;
+    const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
+    // With nothing focused yet, the first step lands on the first or last button.
+    const start = index < 0 ? (step > 0 ? -1 : 0) : index;
+    buttons[(start + step + buttons.length) % buttons.length]!.focus();
   }
 
   private async connectTrainer(): Promise<void> {
@@ -1344,12 +1415,14 @@ export class AppController {
     URL.revokeObjectURL(url);
   }
 
+  private setDemoInputPressed(pressed: boolean): void {
+    this.demoInputPressed = pressed;
+    if (!this.gameActive || !this.demoSource) return;
+    this.demoSource.setEffort(pressed ? 1 : 0);
+  }
+
   private bindDemoControls(): void {
-    const setPressed = (pressed: boolean): void => {
-      this.demoInputPressed = pressed;
-      if (!this.gameActive || !this.demoSource) return;
-      this.demoSource.setEffort(pressed ? 1 : 0);
-    };
+    const setPressed = (pressed: boolean): void => this.setDemoInputPressed(pressed);
     window.addEventListener("keydown", (event) => {
       if (event.code === "Space" || event.code === "ArrowUp") {
         event.preventDefault();
